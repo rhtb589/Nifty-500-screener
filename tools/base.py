@@ -76,7 +76,31 @@ def resolve_ticker(ticker: str) -> str:
 
 def get_ticker_list():
     df = _load_all()
-    return sorted(df["shortName"].tolist())
+    if "shortName" not in df.columns:
+        return []
+    names = (
+        df["shortName"].dropna().astype(str).str.strip()
+    )
+    return sorted(n for n in names if n and n.lower() != "nan")
+
+
+def get_ticker_options() -> list[dict]:
+    """Search options for the UI ticker dropdown.
+
+    Returns {"symbol", "name"} sorted by display name, so the frontend can
+    match either a symbol (TCS.NS) or a company name (TATA CONSULTANCY...).
+    """
+    df = _load_all()
+    if "shortName" in df.columns:
+        names = df["shortName"].fillna("").astype(str).str.strip()
+    else:
+        names = pd.Series("", index=df.index, dtype=object)
+    options = []
+    for symbol, name in zip(df.index.astype(str), names):
+        display = name if name and name.lower() != "nan" else symbol
+        options.append({"symbol": symbol, "name": display})
+    options.sort(key=lambda o: (o["name"].lower(), o["symbol"]))
+    return options
 
 
 def get_row(ticker: str) -> pd.Series:
@@ -84,7 +108,12 @@ def get_row(ticker: str) -> pd.Series:
     key = resolve_ticker(ticker)
     if key not in df.index:
         raise ValueError(f"Ticker '{ticker}' not found in Nifty 500 data.")
-    return df.loc[key]
+    row = df.loc[key]
+    # Duplicate index entries make .loc return a DataFrame, which breaks every
+    # downstream `row.get(...) or ...` truthiness check.
+    if isinstance(row, pd.DataFrame):
+        row = row.iloc[0]
+    return row
 
 
 def safe_float(val, default=np.nan):

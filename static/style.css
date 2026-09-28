@@ -29,6 +29,8 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#0a0a0
 .dropdown-item .ticker{font-weight:600;color:#00d2ff}
 .dropdown-item .name{color:#666;font-size:.75rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:8px}
 .no-results{padding:14px;color:#555;text-align:center;font-size:.85rem}
+.retry-btn{margin-left:6px;background:#7a5cff;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:.8rem;cursor:pointer}
+.retry-btn:hover{background:#8d72ff}
 /* Search & Dropdown */
 .search-bar{margin-bottom:28px}
 

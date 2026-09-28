@@ -9,25 +9,25 @@ from tools import (
     composite_analysis,
 )
 from tools.screener import nifty500_screener_tool
-from tools.base import get_ticker_list, get_stock_overview, get_row, safe_float
+from tools.base import get_ticker_options, get_stock_overview, get_row, safe_float
 from langchain_ollama import ChatOllama
-from langchain_xai import ChatXAI
+#from langchain_xai import ChatXAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 
 app = Flask(__name__)
 
 # Ollama endpoint/model are env-configurable for container integration.
-# llm = ChatOllama(
-#     model=os.environ.get("LLM_MODEL", "qwen3.5:4b"),
-#     temperature=0.7,
-#     base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
-# )
-
-llm = ChatXAI(
-    model="grok-beta",  # Or 'grok-2', 'grok-2-mini'
-    temperature=0.2,
-    xai_api_key=os.environ.get("XAI_API_KEY")
+llm = ChatOllama(
+    model=os.environ.get("LLM_MODEL", "qwen3.5:4b"),
+    temperature=0.7,
+    base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
 )
+
+# llm = ChatXAI(
+#     model="grok-beta",  # Or 'grok-2', 'grok-2-mini'
+#     temperature=0.2,
+#     xai_api_key=os.environ.get("XAI_API_KEY")
+# )
 
 all_tools = [
     valuation_analysis, growth_analysis, profitability_analysis,
@@ -39,6 +39,36 @@ all_tools = [
 TOOL_NAME_MAP = {t.name: t for t in all_tools}
 
 
+def _tool_reply(tool_messages: list, tc: dict, content: str):
+    """Append an AIMessage(tool_calls=[tc]) + ToolMessage pair so the model
+    always receives a result for every tool call — including failures and
+    unknown tools. Missing that pair makes the next invoke fail."""
+    tool_messages.append(AIMessage(content="", tool_calls=[tc]))
+    tool_messages.append(ToolMessage(
+        content=content,
+        tool_call_id=tc.get("id", ""),
+    ))
+
+
+def _content_text(content) -> str:
+    """Normalize an AIMessage content (str, or list of content blocks) to str."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                parts.append(str(block.get("text", block)))
+            else:
+                parts.append(str(block))
+        return "\n".join(p for p in parts if p)
+    return str(content)
+
+
 @app.route("/")
 def index():
     return render_template("index.html", analyses=ANALYSIS_LIST)
@@ -46,7 +76,7 @@ def index():
 
 @app.route("/api/tickers")
 def api_tickers():
-    return jsonify(get_ticker_list())
+    return jsonify(get_ticker_options())
 
 
 @app.route("/api/stock/<ticker>")
@@ -317,7 +347,15 @@ IMPORTANT TOOL RULES:
                 print(f"{tool_name}")
                 if tool_name == "screen_nifty500":
                     print("calling screen_nifty500 with args:", tool_args)
-                    tool_result = nifty500_screener_tool.invoke(tool_args)
+                    try:
+                        tool_result = nifty500_screener_tool.invoke(tool_args)
+                    except Exception as e:
+                        _tool_reply(
+                            tool_messages, tc,
+                            f"Screener error: {e}. Fix the pandas query and call "
+                            "the tool again, or explain the problem to the user.",
+                        )
+                        continue
                     total = tool_result.get("total_matches", 0)
                     results = tool_result.get("results", [])
                     if results:
@@ -392,24 +430,43 @@ IMPORTANT TOOL RULES:
                     return jsonify({"reply": reply})
                 elif tool_name in TOOL_NAME_MAP:
                     tool_ticker = tool_args.get("ticker", ticker or "TCS.NS")
-                    tool_result = TOOL_NAME_MAP[tool_name].invoke(tool_ticker)
+                    try:
+                        tool_result = TOOL_NAME_MAP[tool_name].invoke(tool_ticker)
+                    except Exception as e:
+                        _tool_reply(
+                            tool_messages, tc,
+                            f"Tool '{tool_name}' failed for '{tool_ticker}': {e}. "
+                            "Try a different ticker from the dataset, or tell the "
+                            "user that data is unavailable.",
+                        )
+                        continue
                     summary_text = "\n".join(tool_result.get("summary", []))
                     metrics_text = ", ".join(
                         f"{m['label']}: {m['value']}"
                         for m in tool_result.get("metrics", [])
                         if m.get("value") != "--"
                     )
-                    tool_messages.append(AIMessage(content="", tool_calls=[tc]))
-                    tool_messages.append(ToolMessage(
-                        content=f"Metrics: {metrics_text}\nSummary:\n{summary_text}",
-                        tool_call_id=tc["id"],
-                    ))
+                    _tool_reply(
+                        tool_messages, tc,
+                        f"Metrics: {metrics_text}\nSummary:\n{summary_text}",
+                    )
+                else:
+                    known = ", ".join(sorted(set(TOOL_NAME_MAP) | {"screen_nifty500"}))
+                    _tool_reply(
+                        tool_messages, tc,
+                        f"Unknown tool '{tool_name}'. Available tools: {known}. "
+                        "Call one of those instead.",
+                    )
 
             langchain_messages.extend(tool_messages)
             tool_messages = []
             response = bound_llm.invoke(langchain_messages)
 
-        return jsonify({"reply": response.content})
+        reply = _content_text(getattr(response, "content", "")).strip()
+        if not reply:
+            reply = ("I could not produce a response. Please rephrase your "
+                     "question or select a stock first.")
+        return jsonify({"reply": reply})
 
     except Exception as e:
         return jsonify({"error": f"Chat failed: {str(e)}"}), 500

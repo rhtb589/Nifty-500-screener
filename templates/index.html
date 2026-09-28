@@ -86,12 +86,33 @@ let selectedAnalysis = null;
 let selectedTicker = null;
 let chatHistory = [];
 
-fetch("/api/tickers").then(r=>r.json()).then(d=>{tickers=d});
-
 const searchInput = document.getElementById("searchInput");
 const dropdown = document.getElementById("dropdown");
 let activeIdx = -1;
 let filtered = [];
+let tickersState = "loading";
+
+function loadTickers(retries) {
+  tickersState = "loading";
+  fetch("/api/tickers")
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(d => {
+      if (!Array.isArray(d)) throw new Error("Unexpected /api/tickers payload");
+      tickers = d.filter(o => o && o.symbol);
+      tickersState = "ready";
+      renderDropdown();
+    })
+    .catch(err => {
+      console.error("[tickers] load failed:", err);
+      if (retries > 0) {
+        setTimeout(() => loadTickers(retries - 1), 2500);
+        return;
+      }
+      tickersState = "error";
+      renderDropdown();
+    });
+}
+loadTickers(1);
 
 function injectPlotlyHTML(container, html) {
   container.innerHTML = html;
@@ -145,35 +166,107 @@ function showChatView() {
   });
 }
 
-searchInput.addEventListener("input", function() {
-  const q = this.value.trim().toLowerCase();
-  if (!q) { dropdown.classList.remove("show"); return; }
-  filtered = tickers.filter(t => t.toLowerCase().includes(q)).slice(0, 50);
-  activeIdx = -1;
-  if (!filtered.length) {
-    dropdown.innerHTML = '<div class="no-results">No matching tickers</div>';
-    dropdown.classList.add("show");
+function matchScore(o, q) {
+  const s = o.symbol.toLowerCase();
+  const n = o.name.toLowerCase();
+  if (s === q || n === q) return 0;
+  if (s.startsWith(q)) return 1;
+  if (n.startsWith(q)) return 2;
+  if (s.includes(q)) return 3;
+  if (n.includes(q)) return 4;
+  return -1;
+}
+
+function setDropdownVisible(show) {
+  dropdown.classList.toggle("show", !!show);
+}
+
+function renderDropdown() {
+  const q = searchInput.value.trim().toLowerCase();
+
+  if (!q) {
+    filtered = [];
+    activeIdx = -1;
+    dropdown.innerHTML = "";
+    setDropdownVisible(false);
     return;
   }
-  dropdown.innerHTML = filtered.map((t,i) =>
-    '<div class="dropdown-item" data-i="'+i+'"><span class="ticker">'+t+'</span></div>'
+
+  if (tickersState === "loading") {
+    filtered = [];
+    activeIdx = -1;
+    dropdown.innerHTML = '<div class="no-results">Loading ticker list&#8230;</div>';
+    setDropdownVisible(true);
+    return;
+  }
+
+  if (tickersState === "error") {
+    filtered = [];
+    activeIdx = -1;
+    dropdown.innerHTML = '<div class="no-results">Could not load the ticker list. ' +
+      '<button type="button" class="retry-btn" id="retryTickers">Retry</button></div>';
+    setDropdownVisible(true);
+    const retry = document.getElementById("retryTickers");
+    if (retry) retry.addEventListener("click", () => loadTickers(1));
+    return;
+  }
+
+  filtered = tickers
+    .map(o => ({o: o, score: matchScore(o, q)}))
+    .filter(x => x.score >= 0)
+    .sort((a, b) => a.score - b.score || a.o.name.localeCompare(b.o.name))
+    .slice(0, 50)
+    .map(x => x.o);
+
+  if (!filtered.length) {
+    activeIdx = -1;
+    dropdown.innerHTML = '<div class="no-results">No matching tickers</div>';
+    setDropdownVisible(true);
+    return;
+  }
+
+  if (activeIdx > filtered.length - 1) activeIdx = filtered.length - 1;
+  dropdown.innerHTML = filtered.map((o, i) =>
+    '<div class="dropdown-item" data-i="' + i + '">' +
+      '<span class="ticker">' + escapeHtml(o.symbol) + '</span>' +
+      '<span class="name">' + escapeHtml(o.name) + '</span>' +
+    '</div>'
   ).join("");
-  dropdown.classList.add("show");
+  setDropdownVisible(true);
   dropdown.querySelectorAll(".dropdown-item").forEach(el => {
-    el.addEventListener("mousedown", e => {
+    el.addEventListener("click", e => {
       e.preventDefault();
-      pickTicker(filtered[parseInt(el.dataset.i)]);
+      pickTicker(filtered[parseInt(el.dataset.i, 10)]);
     });
   });
+  highlightDD();
+}
+
+searchInput.addEventListener("input", function() {
+  activeIdx = -1;
+  if (selectedTicker && this.value.trim() !== selectedTicker) {
+    selectedTicker = null;
+    updateChatContext();
+    if (document.getElementById("chatView").style.display !== "flex") {
+      document.getElementById("stockOverview").style.display = "none";
+      document.getElementById("emptyState").style.display = "";
+    }
+  }
+  renderDropdown();
 });
 
-function pickTicker(t) {
-  console.log('[pickTicker] ticker=', t);
-  selectedTicker = t;
-  searchInput.value = t;
-  dropdown.classList.remove("show");
+searchInput.addEventListener("focus", () => {
+  if (selectedTicker && searchInput.value === selectedTicker) searchInput.select();
+});
+
+function pickTicker(o) {
+  if (!o || !o.symbol) return;
+  console.log('[pickTicker] ticker=', o.symbol, 'name=', o.name);
+  selectedTicker = o.symbol;
+  searchInput.value = o.symbol;
+  setDropdownVisible(false);
   updateChatContext();
-  loadStockOverview(t);
+  loadStockOverview(o.symbol);
   document.getElementById("emptyState").style.display = "none";
 }
 
@@ -212,11 +305,23 @@ function renderStockOverview(data) {
 }
 
 searchInput.addEventListener("keydown", e => {
-  if (!dropdown.classList.contains("show")) return;
-  if (e.key === "ArrowDown") { e.preventDefault(); activeIdx = Math.min(activeIdx+1, filtered.length-1); highlightDD(); }
-  else if (e.key === "ArrowUp") { e.preventDefault(); activeIdx = Math.max(activeIdx-1, 0); highlightDD(); }
-  else if (e.key === "Enter" && activeIdx >= 0) { e.preventDefault(); pickTicker(filtered[activeIdx]); }
-  else if (e.key === "Escape") { dropdown.classList.remove("show"); }
+  if (e.key === "Escape") { setDropdownVisible(false); return; }
+
+  if (e.key === "Enter") {
+    e.preventDefault();
+    if (!dropdown.classList.contains("show")) renderDropdown();
+    if (filtered.length) pickTicker(filtered[Math.max(activeIdx, 0)]);
+    return;
+  }
+
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if (!dropdown.classList.contains("show")) renderDropdown();
+    if (!filtered.length) return;
+    if (e.key === "ArrowDown") activeIdx = Math.min(activeIdx + 1, filtered.length - 1);
+    else activeIdx = Math.max(activeIdx - 1, 0);
+    highlightDD();
+  }
 });
 
 function highlightDD() {
