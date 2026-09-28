@@ -1,0 +1,78 @@
+# Daily data pipeline: fundamentals -> OHLCV -> technical indicators -> snapshot.
+# Runs Mon-Fri at 17:00 IST (11:30 UTC), after the 15:30 IST market close.
+# Fundamentals are refreshed EVERY run (replaces the old weekly workflow), so
+# the committed latest_snapshot.csv always carries current fundamentals +
+# fresh technicals whenever CI/CD runs.
+#
+# Data files are committed back to the repo; the trailing Docker block is a
+# ready-to-uncomment placeholder so this workflow can build/push the app
+# image as soon as a Dockerfile is added (no other changes required).
+
+name: Daily data update
+
+on:
+  schedule:
+    - cron: "30 11 * * 1-5" # 11:30 UTC = 17:00 IST, Mon-Fri
+  workflow_dispatch:
+
+permissions:
+  contents: write # commit refreshed data back to the repo
+  packages: write # pre-approved for the docker push step below
+
+concurrency:
+  group: daily-data-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Refresh fundamentals from yfinance
+        run: python refresh_fundamentals.py
+
+      - name: Download latest OHLCV
+        run: python download_data.py
+
+      - name: Recompute technical indicators
+        run: python compute_indicators.py
+
+      - name: Rebuild scanning snapshot
+        run: python build_snapshot.py
+
+      - name: Commit refreshed data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add nifty_500_data.csv stock_data latest_snapshot.csv
+          if git diff --cached --quiet; then
+            echo "No data changes - skipping commit."
+          else
+            git commit -m "data: daily fundamentals + OHLCV + indicators + snapshot ($(date -u +%F))"
+            git push
+          fi
+
+      # ------------------------------------------------------------------
+      # DOCKER INTEGRATION - enable once the Dockerfile exists:
+      # uncomment the block below (permissions are already granted above).
+      # ------------------------------------------------------------------
+      # - name: Build & push image to GHCR
+      #   run: |
+      #     REPO_LC="$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+      #     IMAGE="ghcr.io/${REPO_LC}"
+      #     docker build -t "$IMAGE:latest" -t "$IMAGE:$(date -u +%Y%m%d)" .
+      #     echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      #     docker push "$IMAGE:latest"
+      #     docker push "$IMAGE:$(date -u +%Y%m%d)"

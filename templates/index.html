@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nifty 500 Screener</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h1>Nifty 500 Screener</h1>
+    <p>LangChain-Powered Analysis</p>
+  </div>
+  <div class="sidebar-section">Analysis Models</div>
+  <ul class="analysis-list" id="analysisList">
+    {% for a in analyses %}
+    <li class="analysis-item" data-id="{{ a.id }}" onclick="selectAnalysis({{ a.id }}, this)">
+      <span class="num">{{ a.id }}</span>{{ a.name }}
+    </li>
+    {% endfor %}
+  </ul>
+</aside>
+
+<main class="main">
+  <div class="search-bar">
+    <div class="search-container">
+      <span class="search-icon">&#128269;</span>
+      <input type="text" class="search-input" id="searchInput" placeholder="Search ticker or company name..." autocomplete="off">
+      <div class="dropdown" id="dropdown"></div>
+    </div>
+  </div>
+
+  <div class="empty-state" id="emptyState">
+    <div class="icon">&#128202;</div>
+    <p>Select a ticker to view stock data, then pick an analysis from the sidebar.</p>
+  </div>
+
+  <div class="stock-overview" id="stockOverview" style="display:none">
+    <div class="overview-header">
+      <h2 id="overviewTicker"></h2>
+      <span class="company-name" id="overviewName"></span>
+      <span class="sector-tag" id="overviewSector"></span>
+      <span class="industry-tag" id="overviewIndustry"></span>
+    </div>
+    <div class="metrics-grid" id="overviewMetrics"></div>
+  </div>
+
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    <div class="loading-text" id="loadingText">Loading...</div>
+  </div>
+
+  <div class="results" id="results" style="display:none">
+    <div class="results-header">
+      <span class="analysis-tag" id="resultAnalysis"></span>
+    </div>
+    <div class="metrics-grid" id="metricsGrid"></div>
+    <div class="results-chart" id="resultsChart"></div>
+    <div class="summary" id="summarySection">
+      <h3>Key Insights</h3>
+      <ul id="summaryList"></ul>
+    </div>
+  </div>
+
+  <div class="error" id="errorBox" style="display:none"></div>
+
+  <div class="chat-view" id="chatView" style="display:none">
+    <div class="chat-view-header">
+      <span class="analysis-tag">Ask AI</span>
+      <span class="chat-context" id="chatContext"></span>
+    </div>
+    <div class="chat-messages" id="chatMessages"></div>
+    <div class="chat-input-row">
+      <input type="text" class="chat-input" id="chatInput" placeholder="Ask about any stock or financial topic..." onkeydown="if(event.key==='Enter')sendChat()">
+      <button class="chat-send" id="chatSend" onclick="sendChat()">Send</button>
+    </div>
+  </div>
+</main>
+
+<script>
+let tickers = [];
+let selectedAnalysis = null;
+let selectedTicker = null;
+let chatHistory = [];
+
+fetch("/api/tickers").then(r=>r.json()).then(d=>{tickers=d});
+
+const searchInput = document.getElementById("searchInput");
+const dropdown = document.getElementById("dropdown");
+let activeIdx = -1;
+let filtered = [];
+
+function injectPlotlyHTML(container, html) {
+  container.innerHTML = html;
+  container.querySelectorAll("script").forEach(function(old) {
+    var s = document.createElement("script");
+    if (old.src) s.src = old.src;
+    else s.textContent = old.textContent;
+    document.head.appendChild(s);
+  });
+}
+
+function selectAnalysis(id, el) {
+  console.log('[selectAnalysis] id=', id, 'selectedTicker=', selectedTicker);
+  document.querySelectorAll(".analysis-item").forEach(e=>e.classList.remove("active"));
+  el.classList.add("active");
+  selectedAnalysis = id;
+
+  if (id === 11) {
+    showChatView();
+  } else {
+    hideChatView();
+    if (selectedTicker) {
+      console.log('[selectAnalysis] calling runAnalysis');
+      runAnalysis();
+    } else {
+      console.warn('[selectAnalysis] selectedTicker is falsy, not running analysis');
+      document.getElementById("errorBox").textContent = "Please select a ticker first.";
+      document.getElementById("errorBox").style.display = "block";
+      document.getElementById("errorBox").scrollIntoView({behavior: 'smooth', block: 'center'});
+    }
+  }
+}
+
+function hideChatView() {
+  document.getElementById("chatView").style.display = "none";
+  if (selectedTicker) {
+    document.getElementById("stockOverview").style.display = "block";
+  }
+}
+
+function showChatView() {
+  document.getElementById("emptyState").style.display = "none";
+  document.getElementById("results").style.display = "none";
+  document.getElementById("stockOverview").style.display = "none";
+  document.getElementById("chatView").style.display = "flex";
+  updateChatContext();
+  const chatMessages = document.getElementById("chatMessages");
+  requestAnimationFrame(() => {
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    document.getElementById("chatInput").focus();
+  });
+}
+
+searchInput.addEventListener("input", function() {
+  const q = this.value.trim().toLowerCase();
+  if (!q) { dropdown.classList.remove("show"); return; }
+  filtered = tickers.filter(t => t.toLowerCase().includes(q)).slice(0, 50);
+  activeIdx = -1;
+  if (!filtered.length) {
+    dropdown.innerHTML = '<div class="no-results">No matching tickers</div>';
+    dropdown.classList.add("show");
+    return;
+  }
+  dropdown.innerHTML = filtered.map((t,i) =>
+    '<div class="dropdown-item" data-i="'+i+'"><span class="ticker">'+t+'</span></div>'
+  ).join("");
+  dropdown.classList.add("show");
+  dropdown.querySelectorAll(".dropdown-item").forEach(el => {
+    el.addEventListener("mousedown", e => {
+      e.preventDefault();
+      pickTicker(filtered[parseInt(el.dataset.i)]);
+    });
+  });
+});
+
+function pickTicker(t) {
+  console.log('[pickTicker] ticker=', t);
+  selectedTicker = t;
+  searchInput.value = t;
+  dropdown.classList.remove("show");
+  updateChatContext();
+  loadStockOverview(t);
+  document.getElementById("emptyState").style.display = "none";
+}
+
+async function loadStockOverview(ticker) {
+  document.getElementById("errorBox").style.display = "none";
+  document.getElementById("results").style.display = "none";
+  document.getElementById("stockOverview").style.display = "none";
+  document.getElementById("loadingText").textContent = "Loading stock data...";
+  document.getElementById("loading").classList.add("show");
+
+  try {
+    const resp = await fetch("/api/stock/" + encodeURIComponent(ticker));
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    renderStockOverview(data);
+  } catch(err) {
+    document.getElementById("errorBox").textContent = err.message;
+    document.getElementById("errorBox").style.display = "block";
+  } finally {
+    document.getElementById("loading").classList.remove("show");
+  }
+}
+
+function renderStockOverview(data) {
+  document.getElementById("overviewTicker").textContent = data.ticker;
+  document.getElementById("overviewName").textContent = data.name;
+  document.getElementById("overviewSector").textContent = data.sector || "N/A";
+  document.getElementById("overviewIndustry").textContent = data.industry || "N/A";
+
+  const grid = document.getElementById("overviewMetrics");
+  grid.innerHTML = data.metrics.map(m =>
+    '<div class="metric-card"><div class="label">'+m.label+'</div><div class="value">'+m.value+'</div></div>'
+  ).join("");
+
+  document.getElementById("stockOverview").style.display = "block";
+}
+
+searchInput.addEventListener("keydown", e => {
+  if (!dropdown.classList.contains("show")) return;
+  if (e.key === "ArrowDown") { e.preventDefault(); activeIdx = Math.min(activeIdx+1, filtered.length-1); highlightDD(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); activeIdx = Math.max(activeIdx-1, 0); highlightDD(); }
+  else if (e.key === "Enter" && activeIdx >= 0) { e.preventDefault(); pickTicker(filtered[activeIdx]); }
+  else if (e.key === "Escape") { dropdown.classList.remove("show"); }
+});
+
+function highlightDD() {
+  dropdown.querySelectorAll(".dropdown-item").forEach((el,i) => el.classList.toggle("active", i===activeIdx));
+}
+
+document.addEventListener("click", e => { if (!e.target.closest(".search-container")) dropdown.classList.remove("show"); });
+
+async function runAnalysis() {
+  console.log('[runAnalysis] start', {selectedAnalysis, selectedTicker});
+  if (!selectedAnalysis || !selectedTicker) {
+    console.warn('[runAnalysis] early return - missing selection');
+    return;
+  }
+  document.getElementById("results").style.display = "none";
+  document.getElementById("errorBox").style.display = "none";
+  document.getElementById("loadingText").textContent = "Running analysis...";
+  document.getElementById("loading").classList.add("show");
+
+  try {
+    const resp = await fetch("/api/analyze", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ticker: selectedTicker, analysis_id: selectedAnalysis})
+    });
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    console.log('[runAnalysis] success, rendering results');
+    renderResults(data);
+  } catch(err) {
+    console.error('[runAnalysis] error:', err);
+    document.getElementById("errorBox").textContent = err.message;
+    document.getElementById("errorBox").style.display = "block";
+    document.getElementById("errorBox").scrollIntoView({behavior: 'smooth', block: 'center'});
+  } finally {
+    document.getElementById("loading").classList.remove("show");
+  }
+}
+
+function renderResults(data) {
+  document.getElementById("resultAnalysis").textContent = data.analysis;
+
+  const grid = document.getElementById("metricsGrid");
+  grid.innerHTML = data.metrics.map(m =>
+    '<div class="metric-card"><div class="label">'+m.label+'</div><div class="value">'+m.value+'</div></div>'
+  ).join("");
+
+  const list = document.getElementById("summaryList");
+  list.innerHTML = (data.summary||[]).map(s => "<li>"+s+"</li>").join("");
+
+  const chartDiv = document.getElementById("resultsChart");
+  if (data.chart) {
+    injectPlotlyHTML(chartDiv, data.chart);
+    chartDiv.style.display = "block";
+  } else {
+    chartDiv.innerHTML = "";
+    chartDiv.style.display = "none";
+  }
+
+  document.getElementById("results").style.display = "block";
+}
+
+function updateChatContext() {
+  const el = document.getElementById("chatContext");
+  if (selectedTicker) {
+    el.textContent = "Context: " + selectedTicker;
+    el.style.display = "inline-block";
+  } else {
+    el.textContent = "No stock selected — ask me anything";
+    el.style.display = "inline-block";
+  }
+}
+
+function renderChatMessages() {
+  const container = document.getElementById("chatMessages");
+  container.innerHTML = chatHistory.map(m => {
+    const hasHtml = m.content.includes('<div class="screener-table-wrap">');
+    const rendered = hasHtml ? m.content : renderMarkdown(m.content);
+    return '<div class="chat-msg ' + m.role + '">' +
+      '<div class="chat-role">' + (m.role === 'user' ? 'You' : 'AI') + '</div>' +
+      '<div class="chat-text">' + rendered + '</div>' +
+    '</div>';
+  }).join("");
+  container.scrollTop = container.scrollHeight;
+}
+
+function renderMarkdown(text) {
+  const escaped = escapeHtml(text);
+  const lines = escaped.split("\n");
+  let html = "";
+  let inTable = false;
+  let isHeader = true;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.match(/^\|.*\|$/)) {
+      if (trimmed.match(/^\|[\s\-|]+\|$/)) {
+        isHeader = false;
+        continue;
+      }
+      const cells = trimmed.split("|").slice(1, -1).map(c => c.trim());
+      if (!inTable) {
+        html += '<div class="chat-table-wrap"><table class="chat-table">';
+        inTable = true;
+      }
+      if (isHeader) {
+        html += "<thead><tr>" + cells.map(c => "<th>" + c + "</th>").join("") + "</tr></thead><tbody>";
+      } else {
+        html += "<tr>" + cells.map(c => "<td>" + c + "</td>").join("") + "</tr>";
+      }
+    } else {
+      if (inTable) {
+        html += "</tbody></table></div>";
+        inTable = false;
+        isHeader = true;
+      }
+      if (trimmed) {
+        html += "<p>" + trimmed + "</p>";
+      } else {
+        html += "<br>";
+      }
+    }
+  }
+  if (inTable) html += "</tbody></table></div>";
+  return html;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+async function sendChat() {
+  const input = document.getElementById("chatInput");
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  input.value = "";
+  chatHistory.push({role: "user", content: msg});
+  renderChatMessages();
+
+  document.getElementById("chatSend").disabled = true;
+  document.getElementById("chatSend").textContent = "Thinking...";
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+  try {
+    const resp = await fetch("/api/chat", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        ticker: selectedTicker || null,
+        analysis_id: selectedAnalysis === 11 ? null : selectedAnalysis,
+        messages: chatHistory
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    chatHistory.push({role: "assistant", content: data.reply});
+    renderChatMessages();
+  } catch(err) {
+    clearTimeout(timeoutId);
+    const errMsg = err.name === "AbortError"
+      ? "Request timed out. The LLM took too long to respond."
+      : "Error: " + err.message;
+    chatHistory.push({role: "assistant", content: errMsg});
+    renderChatMessages();
+  } finally {
+    document.getElementById("chatSend").disabled = false;
+    document.getElementById("chatSend").textContent = "Send";
+  }
+}
+</script>
+</body>
+</html>
