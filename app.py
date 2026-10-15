@@ -1,6 +1,7 @@
 import os
-
-from flask import Flask, render_template, jsonify, request
+import re
+import dotenv
+from flask import Flask, render_template, jsonify, request, redirect
 from tools import (
     ANALYSIS_MAP, ANALYSIS_LIST,
     valuation_analysis, growth_analysis, profitability_analysis,
@@ -9,31 +10,39 @@ from tools import (
     composite_analysis,
 )
 from tools.screener import nifty500_screener_tool
-from tools.base import get_ticker_options, get_stock_overview, get_row, safe_float
-from langchain_ollama import ChatOllama
-#from langchain_xai import ChatXAI
+from tools.base import (
+    get_ticker_options, get_stock_overview, get_row, safe_float,
+    reset_caches, resolve_ticker,
+)
+from tools.cashflow_statement import build_cashflow_payload , get_cashflow_statement
+from tools.balance_sheet_statement import build_balance_sheet_payload , get_balance_sheet
+from tools.income_statement import build_income_statement_payload , get_income_statement
+#from langchain_ollama import ChatOllama
+from langchain_xai import ChatXAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 app = Flask(__name__)
-
+dotenv.load_dotenv()
 # Ollama endpoint/model are env-configurable for container integration.
-llm = ChatOllama(
-    model=os.environ.get("LLM_MODEL", "qwen3.5:4b"),
-    temperature=0.7,
-    base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
-)
-
-# llm = ChatXAI(
-#     model="grok-beta",  # Or 'grok-2', 'grok-2-mini'
-#     temperature=0.2,
-#     xai_api_key=os.environ.get("XAI_API_KEY")
+# llm = ChatOllama(
+#     model=os.environ.get("LLM_MODEL", "qwen3.5:4b"),
+#     temperature=0.7,
+#     base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
 # )
+
+
+# Initialize the Gemini model
+llm = ChatGoogleGenerativeAI(
+    model="gemini-3.5-flash-lite",  # or "gemini-2.5-pro"
+    temperature=0.2,
+)
 
 all_tools = [
     valuation_analysis, growth_analysis, profitability_analysis,
     solvency_analysis, dividend_analysis, trend_analysis,
     breakout_analysis, volume_analysis, sentiment_analysis,
-    composite_analysis, nifty500_screener_tool,
+    composite_analysis, nifty500_screener_tool,get_income_statement , get_cashflow_statement , get_balance_sheet
 ]
 
 TOOL_NAME_MAP = {t.name: t for t in all_tools}
@@ -69,6 +78,117 @@ def _content_text(content) -> str:
     return str(content)
 
 
+def _history_text(content: str) -> str:
+    """Compact screener HTML tables in earlier turns into plain-text rows so the
+    conversation history stays small enough to keep the full chat in context."""
+    if not content or "screener-table-wrap" not in content:
+        return content
+    head, _, rest = content.partition('<div class="screener-table-wrap">')
+    rows = re.findall(r"<tr.*?</tr>", rest, flags=re.S)
+    lines = []
+    for r in rows[:25]:
+        cells = [
+            re.sub(r"<.*?>", "", c).strip()
+            for c in re.findall(r"<t[hd].*?</t[hd]>", r, flags=re.S)
+        ]
+        if cells:
+            lines.append(" | ".join(cells))
+    omitted = len(rows) - len(lines)
+    tail = f"\n[... {omitted} more matching stocks omitted ...]" if omitted > 0 else ""
+    return head + "\n".join(lines) + tail
+
+
+TICKER_GUIDANCE = """If the user asks about a stock by name, resolve it to the ticker with the closest
+symbol, or the stock with a similar name in the shortName column of the dataset.
+Always use the short name while addressing the stock in your response, and use the
+full name in the summary of the analysis."""
+
+TOOL_GUIDE = """You have access to 14 tools:
+
+Single-stock analysis tools (take a ticker string, return metrics + summary):
+1. valuation_analysis — Relative valuation & multiples
+2. growth_analysis — GARP & PEG modeling
+3. profitability_analysis — Profitability & DuPont decomposition
+4. solvency_analysis — Solvency, liquidity & distress screening
+5. dividend_analysis — Dividend sustainability & cash yield
+6. trend_analysis — Trend regime & moving average alignment
+7. breakout_analysis — Support, resistance & breakout proximity
+8. volume_analysis — Volume anomaly & accumulation signals
+9. sentiment_analysis — Analyst consensus & price targets
+10. composite_analysis — Multi-factor composite quant score
+
+Stock screener tool:
+11. screen_nifty500 — Executes pandas filter code against 500 Indian stocks.
+    Takes a 'query' parameter: Python pandas code that filters the DataFrame 'df'.
+    ALL matching stocks are returned automatically — do NOT use .head() unless user asks for a specific number.
+
+    ALIASES (also accepted): price/close → currentPrice, pe/trailing_pe → trailingPE,
+    pb/price_to_book → priceToBook, market_cap → marketCap, roe → returnOnEquity,
+    profit_margin → profitMargins, dividend_yield → dividendYield
+
+    CRITICAL SYNTAX RULES:
+    1. Always use parentheses around EACH comparison when combining with & or |:
+       CORRECT: df = df[(df['trailingPE'] < 20) & (df['dividendYield'] > 0.02)]
+       WRONG:   df = df[df['trailingPE'] < 20 & df['dividendYield'] > 0.02]
+    2. For "less than" use < operator, for "greater than" use > operator
+    3. For "less than or equal" use <=, for "greater than or equal" use >=
+
+    EXAMPLES OF CORRECT QUERIES:
+    - "stocks with price less than 50":
+      df = df[df['currentPrice'] < 50]
+    - "stocks with PE ratio less than 20":
+      df = df[df['trailingPE'] < 20]
+    - "stocks with dividend yield greater than 3%":
+      df = df[df['dividendYield'] > 0.03]
+    - "stocks with market cap greater than 1 trillion":
+      df = df[df['marketCap'] > 1e12]
+    - "stocks with ROE greater than 15% and profit margin greater than 10%":
+      df = df[(df['returnOnEquity'] > 0.15) & (df['profitMargins'] > 0.10)]
+    - "stocks with ROE greater than 15% or profit margin greater than 10%":
+      df = df[(df['returnOnEquity'] > 0.15) | (df['profitMargins'] > 0.10)]
+    - "sort by price ascending":
+      df = df.sort_values('currentPrice')
+    - "top 10 stocks by market cap":
+      df = df.sort_values('marketCap', ascending=False).head(10)
+
+    - if there are queries with multiple filtering then merge the queries instead of chaining them
+
+Financial statement tools (take a ticker string, return the full statement):
+12. get_cashflow_statement — Cash flow statement
+13. get_balance_sheet — Balance sheet
+14. get_income_statement — Income statement
+
+When a user asks about metrics, valuations, trends, or any financial data for a specific stock, use tools 1-10 or 12-14.
+When a user asks to find, filter, or screen stocks matching criteria, use tool 11 (screen_nifty500).
+Always provide clear, concise, and actionable insights. Use Indian Rupee (₹) formatting when discussing prices.
+
+RESPONSE FORMAT for screener results:
+- The screener tool returns a table with ALL matching stocks. Display this table to the user as-is.
+- Your text summary should ONLY highlight the top 5-10 most notable picks with brief reasoning.
+- Do NOT repeat the full table in your text — the table is already shown separately.
+
+IMPORTANT TOOL RULES:
+- After calling ANY tool and receiving results, present those results directly to the user. DO NOT call the same tool again.
+- Each tool returns complete data. One call is enough.
+- After receiving tool results, write your final response to the user summarizing the findings."""
+
+CONVERSATION_GUIDE = """CONVERSATION RULES:
+- This is an ongoing, multi-turn conversation. Every message below is part of the
+  running conversation — read it before answering, and never treat a question in isolation.
+- Answer the user's LATEST question, using the earlier turns to resolve references such as
+  "this stock", "it", "this", "what would you suggest", "should I buy", "compare them", or
+  "how about the other one".
+- If the figures or analysis needed to answer are already present in the conversation
+  history or in the analysis findings above, answer directly from them — do NOT call the
+  same tool again just to re-fetch data you already have.
+- Recommendations, suggestions, and opinions are welcome: base them on the data discussed
+  in this conversation and clearly state the reasoning and any risks.
+- Every turn MUST end with a final, plain-language answer written for the user. Never end a
+  turn on a tool call, and never return an empty response.
+- If something is genuinely missing (for example, no stock has been mentioned yet), ask one
+  short clarifying question instead of failing silently."""
+
+
 @app.route("/")
 def index():
     return render_template("index.html", analyses=ANALYSIS_LIST)
@@ -88,6 +208,84 @@ def api_stock(ticker):
         return jsonify({"error": str(e)}), 404
     except Exception as e:
         return jsonify({"error": f"Failed to load stock data: {str(e)}"}), 500
+
+
+@app.route("/cashflow/<ticker>")
+def cashflow_page(ticker):
+    """Standalone Cash Flow Statement dashboard (dark theme, Plotly)."""
+    try:
+        key = resolve_ticker(ticker)
+        get_row(key)
+    except (ValueError, KeyError):
+        return redirect("/")
+    return render_template("cashflow.html", ticker=key)
+
+
+@app.route("/api/cashflow/<ticker>")
+def api_cashflow(ticker):
+    try:
+        return jsonify(build_cashflow_payload(ticker))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        return jsonify({"error": f"Failed to load cash flow statement: {str(e)}"}), 500
+
+
+@app.route("/balance_sheet/<ticker>")
+def balance_sheet_page(ticker):
+    """Standalone Balance Sheet dashboard (dark theme, Plotly)."""
+    try:
+        key = resolve_ticker(ticker)
+        get_row(key)
+    except (ValueError, KeyError):
+        return redirect("/")
+    return render_template("balance_sheet.html", ticker=key)
+
+
+@app.route("/api/balance_sheet/<ticker>")
+def api_balance_sheet(ticker):
+    try:
+        return jsonify(build_balance_sheet_payload(ticker))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        return jsonify({"error": f"Failed to load balance sheet: {str(e)}"}), 500
+
+
+@app.route("/income_statement/<ticker>")
+def income_statement_page(ticker):
+    """Standalone Income Statement dashboard (dark theme, Plotly)."""
+    try:
+        key = resolve_ticker(ticker)
+        get_row(key)
+    except (ValueError, KeyError):
+        return redirect("/")
+    return render_template("income_statement.html", ticker=key)
+
+
+@app.route("/api/income_statement/<ticker>")
+def api_income_statement(ticker):
+    try:
+        return jsonify(build_income_statement_payload(ticker))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        return jsonify({"error": f"Failed to load income statement: {str(e)}"}), 500
+
+
+@app.route("/api/reload", methods=["POST"])
+def api_reload():
+    """Drop cached CSVs so data refreshed by the daily pipeline (scheduler.py)
+    is served immediately, without restarting the app.
+
+    Optionally protected: set RELOAD_TOKEN in the environment and send it as
+    the X-Reload-Token header.
+    """
+    expected = os.environ.get("RELOAD_TOKEN")
+    if expected and request.headers.get("X-Reload-Token") != expected:
+        return jsonify({"error": "invalid token"}), 403
+    reset_caches()
+    return jsonify({"status": "ok", "detail": "csv caches reset"})
 
 
 @app.route("/api/analyze", methods=["POST"])
@@ -144,193 +342,56 @@ def api_chat():
             analysis_summary = "Analysis data unavailable."
 
     if overview:
+        if analysis_name:
+            analysis_block = (
+                f"Current analysis: {analysis_name}\n"
+                f"Analysis findings:\n{analysis_summary or 'No summary available.'}"
+            )
+        else:
+            analysis_block = (
+                "No specific analysis tab is open \u2014 use the tools to fetch whatever "
+                "data the user asks about."
+            )
         system_prompt = f"""You are a financial analysis assistant for the Indian stock market.
-You are currently analyzing **{ticker}** — {overview['name']}.
+You are currently analyzing **{ticker}** \u2014 {overview['name']}.
 Sector: {overview['sector']} | Industry: {overview['industry']}
 
 Key stock metrics:
 {chr(10).join(f"- {m['label']}: {m['value']}" for m in overview['metrics'])}
 
-Current analysis: {analysis_name}
-{f'Analysis findings:{chr(10)}{analysis_summary}' if analysis_summary else ''}
+{analysis_block}
 
-if analysis about a stock is asked give the analysis of the ticker with the closest symbol to it or the stock havinig the 
-similar name in the shortname column of the dataset
-You have access to 11 tools:
+{TICKER_GUIDANCE}
 
-Single-stock analysis tools (take a ticker string, return metrics + summary):
+{TOOL_GUIDE}
 
-1. valuation_analysis — Relative valuation & multiples
-
-2. growth_analysis — GARP & PEG modeling
-
-3. profitability_analysis — Profitability & DuPont decomposition
-
-4. solvency_analysis — Solvency, liquidity & distress screening
-
-5. dividend_analysis — Dividend sustainability & cash yield
-
-6. trend_analysis — Trend regime & moving average alignment
-
-7. breakout_analysis — Support, resistance & breakout proximity
-
-8. volume_analysis — Volume anomaly & accumulation signals
-
-9. sentiment_analysis — Analyst consensus & price targets
-
-10. composite_analysis — Multi-factor composite quant score
-
-
-
-Stock screener tool:
-
-11. screen_nifty500 — Executes pandas filter code against 500 Indian stocks.
-
-    Takes a 'query' parameter: Python pandas code that filters the DataFrame 'df'.
-
-    ALL matching stocks are returned automatically — do NOT use .head() unless user asks for a specific number.
-
-
-    ALIASES (also accepted): price/close → currentPrice, pe/trailing_pe → trailingPE,
-
-    pb/price_to_book → priceToBook, market_cap → marketCap, roe → returnOnEquity,
-
-    profit_margin → profitMargins, dividend_yield → dividendYield
-
-    CRITICAL SYNTAX RULES:
-
-    1. Always use parentheses around EACH comparison when combining with & or |:
-
-       CORRECT: df = df[(df['trailingPE'] < 20) & (df['dividendYield'] > 0.02)]
-
-       WRONG:   df = df[df['trailingPE'] < 20 & df['dividendYield'] > 0.02]
-
-
-    2. For "less than" use < operator, for "greater than" use > operator
-    3. For "less than or equal" use <=, for "greater than or equal" use >=
-
-    EXAMPLES OF CORRECT QUERIES:
-    - "stocks with price less than 50":
-      df = df[df['currentPrice'] < 50]
-
-    - "stocks with PE ratio less than 20":
-      df = df[df['trailingPE'] < 20]
-
-    - "stocks with dividend yield greater than 3%":
-      df = df[df['dividendYield'] > 0.03]
-
-    - "stocks with market cap greater than 1 trillion":
-      df = df[df['marketCap'] > 1e12]
-
-    - if there are queries with multiple filtering then merge the queries instead of chaining them
-      eg: "stocks with ROE greater than 15% and profit margin greater than 10%":
-      df = df[(df['returnOnEquity'] > 0.15) & (df['profitMargins'] > 0.10)]
-      eg: "stocks with ROE greater than 15% or profit margin greater than 10%":
-      df = df[(df['returnOnEquity'] > 0.15) | (df['profitMargins'] > 0.10)]
-
-    - "sort by price ascending":
-      df = df.sort_values('currentPrice')
-
-    - "top 10 stocks by market cap":
-      df = df.sort_values('marketCap', ascending=False).head(10)
-
-
-When a user asks about metrics, valuations, trends, or any financial data for a specific stock, use tools 1-10.
-When a user asks to find, filter, or screen stocks matching criteria, use tool 11 (screen_nifty500).
-Always provide clear, concise, and actionable insights. Use Indian Rupee (₹) formatting when discussing prices.
-
-
-
-RESPONSE FORMAT for screener results:
-
-- The screener tool returns a table with ALL matching stocks. Display this table to the user as-is.
-- Your text summary should ONLY highlight the top 5-10 most notable picks with brief reasoning.
-- Do NOT repeat the full table in your text — the table is already shown separately.
-
-IMPORTANT TOOL RULES:
-
-- After calling ANY tool and receiving results, present those results directly to the user. DO NOT call the same tool again.
-- Each tool returns complete data. One call is enough.
-- After receiving tool results, write your final response to the user summarizing the findings."""
+{CONVERSATION_GUIDE}"""
     else:
-        system_prompt = """You are a financial analysis assistant for the Indian stock market.
-You can answer general questions about investing, financial metrics, valuation methods, and market concepts.
+        system_prompt = f"""You are a financial analysis assistant for the Indian stock market.
+You answer questions about Indian stocks, financial markets, financial statements and
+investment analysis \u2014 whether or not a stock is selected in the UI.
 
-if analysis about a stock is asked give the analysis of the ticker with the closest symbol to it or the stock havinig the 
-similar name in the shortname column of the dataset
-eg: give analysis of hdfc bank is asked give the analysis of HDFCBANK.NS
-always use the short name while adressing the stock in your response, and use the full name in the summary of the analysis.
+{TICKER_GUIDANCE}
 
+{TOOL_GUIDE}
 
-You have access to 11 tools:
-
-Single-stock analysis tools (take a ticker string, return metrics + summary):
-1. valuation_analysis — Relative valuation & multiples
-2. growth_analysis — GARP & PEG modeling
-3. profitability_analysis — Profitability & DuPont decomposition
-4. solvency_analysis — Solvency, liquidity & distress screening
-5. dividend_analysis — Dividend sustainability & cash yield
-6. trend_analysis — Trend regime & moving average alignment
-7. breakout_analysis — Support, resistance & breakout proximity
-8. volume_analysis — Volume anomaly & accumulation signals
-9. sentiment_analysis — Analyst consensus & price targets
-10. composite_analysis — Multi-factor composite quant score
-
-Stock screener tool:
-11. screen_nifty500 — Executes pandas filter code against 500 Indian stocks.
-    Takes a 'query' parameter: Python pandas code that filters the DataFrame 'df'.
-    ALL matching stocks are returned automatically — do NOT use .head() unless user asks for a specific number.
-
-    ALIASES (also accepted): price/close → currentPrice, pe/trailing_pe → trailingPE,
-    pb/price_to_book → priceToBook, market_cap → marketCap, roe → returnOnEquity,
-    profit_margin → profitMargins, dividend_yield → dividendYield
-
-    CRITICAL SYNTAX RULES:
-    1. Always use parentheses around EACH comparison when combining with & or |:
-       CORRECT: df = df[(df['trailingPE'] < 20) & (df['dividendYield'] > 0.02)]
-       WRONG:   df = df[df['trailingPE'] < 20 & df['dividendYield'] > 0.02]
-
-    2. For "less than" use < operator, for "greater than" use > operator
-    3. For "less than or equal" use <=, for "greater than or equal" use >=
-
-    EXAMPLES OF CORRECT QUERIES:
-    - "stocks with price less than 50":
-      df = df[df['currentPrice'] < 50]
-    - "stocks with PE ratio less than 20":
-      df = df[df['trailingPE'] < 20]
-    - "stocks with dividend yield greater than 3%":
-      df = df[df['dividendYield'] > 0.03]
-    - "stocks with market cap greater than 1 trillion":
-      df = df[df['marketCap'] > 1e12]
-    - "stocks with ROE greater than 15% and profit margin greater than 10%":
-      df = df[(df['returnOnEquity'] > 0.15) & (df['profitMargins'] > 0.10)]
-    - "sort by price ascending":
-      df = df.sort_values('currentPrice')
-    - "top 10 stocks by market cap":
-      df = df.sort_values('marketCap', ascending=False).head(10)
-
-When a user asks about a specific stock, use tools 1-10.
-When a user asks to find, filter, or screen stocks matching criteria, use tool 11 (screen_nifty500).
-Always provide clear, concise, and actionable insights. Use Indian Rupee (₹) formatting when discussing prices.
-
-RESPONSE FORMAT for screener results:
-- The screener tool returns a table with ALL matching stocks. Display this table to the user as-is.
-- Your text summary should ONLY highlight the top 5-10 most notable picks with brief reasoning.
-- Do NOT repeat the full table in your text — the table is already shown separately.
-
-IMPORTANT TOOL RULES:
-- After calling ANY tool and receiving results, present those results directly to the user. DO NOT call the same tool again.
-- Each tool returns complete data. One call is enough.
-- After receiving tool results, write your final response to the user summarizing the findings."""
+{CONVERSATION_GUIDE}"""
 
     langchain_messages = [SystemMessage(content=system_prompt)]
-    for msg in messages_raw:
+    # Replay the conversation so follow-up questions keep their context.
+    # Older turns are trimmed, but a turn is never split (we always start on a
+    # user message) and older history is preserved in the browser.
+    for msg in messages_raw[-30:]:
         role = msg.get("role", "user")
-        content = msg.get("content", "")
+        content = _history_text(msg.get("content", ""))
+        if not content:
+            continue
         if role == "user":
             langchain_messages.append(HumanMessage(content=content))
         elif role == "assistant":
             langchain_messages.append(AIMessage(content=content))
+    while len(langchain_messages) > 1 and isinstance(langchain_messages[1], AIMessage):
+        langchain_messages.pop(1)
 
     try:
         bound_llm = llm.bind_tools(all_tools)
@@ -463,9 +524,34 @@ IMPORTANT TOOL RULES:
             response = bound_llm.invoke(langchain_messages)
 
         reply = _content_text(getattr(response, "content", "")).strip()
+        if not reply or getattr(response, "tool_calls", None):
+            # The model either returned nothing, or stopped on an unanswered tool
+            # call. Nudge it once — this time without tools bound — so it must
+            # answer from the conversation history instead of failing silently.
+            nudge = list(tool_messages)
+            for tc in getattr(response, "tool_calls", None) or []:
+                _tool_reply(
+                    nudge, tc,
+                    "No new data is available for that call. Use the results "
+                    "already present in this conversation and answer the "
+                    "user's question directly.",
+                )
+            nudge.append(HumanMessage(
+                content=(
+                    "Give your final answer to my last question now, using the "
+                    "analysis, figures and earlier answers already discussed in "
+                    "this conversation. Do not call any more tools."
+                )
+            ))
+            try:
+                reply = _content_text(
+                    llm.invoke(langchain_messages + nudge).content
+                ).strip()
+            except Exception:
+                reply = ""
         if not reply:
-            reply = ("I could not produce a response. Please rephrase your "
-                     "question or select a stock first.")
+            reply = ("I could not produce a response for that. Please rephrase "
+                     "your question, or name the stock you would like me to look at.")
         return jsonify({"reply": reply})
 
     except Exception as e:

@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cash Flow Statement</title>
+<link rel="stylesheet" href="/static/cashflow.css">
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+
+<header class="cf-header">
+  <div class="cf-header-left">
+    <button class="cf-back" type="button" onclick="goBack()">&larr; Back</button>
+    <div class="cf-id">
+      <div class="cf-title-row">
+        <h1 id="cfName">Loading&hellip;</h1>
+        <span class="cf-badge cf-badge-ticker" id="cfTicker"></span>
+        <span class="cf-badge cf-badge-live"><span class="cf-dot"></span>Annual Cash Flow</span>
+      </div>
+      <p class="cf-sub" id="cfSub">Consolidated annual statement of cash flows &bull; last 4 fiscal years</p>
+    </div>
+  </div>
+  <div class="cf-controls">
+    <div class="cf-toggle" role="group" aria-label="Currency unit">
+      <button type="button" id="cfUnitCr" class="active" onclick="setUnit('crores')">&#8377; Crores</button>
+      <button type="button" id="cfUnitMn" onclick="setUnit('millions')">&#8377; Millions</button>
+    </div>
+    <button class="cf-btn" type="button" onclick="exportCSV()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+      Export CSV
+    </button>
+    <button class="cf-btn" type="button" onclick="window.print()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+      Print / PDF
+    </button>
+  </div>
+</header>
+
+<main class="cf-main">
+  <div class="cf-error" id="cfError" style="display:none"></div>
+
+  <section class="cf-block">
+    <div class="cf-block-head">
+      <h2 id="cfKpiTitle">Executive Cash Highlights</h2>
+      <span class="cf-unit-note">Unit: <b id="cfUnitLabel">&#8377; in Crores</b></span>
+    </div>
+    <div class="cf-kpi-grid" id="cfKpis"></div>
+  </section>
+
+  <section class="cf-charts">
+    <div class="cf-card">
+      <div class="cf-card-head">
+        <div>
+          <h3>Cash Generation &amp; Net Income Dynamics</h3>
+          <p>Net profit vs operating cash flow vs free cash flow</p>
+        </div>
+        <span class="cf-unit-tag chart-unit">&#8377; Cr</span>
+      </div>
+      <div class="cf-chart" id="cfTrendChart"></div>
+    </div>
+    <div class="cf-card">
+      <div class="cf-card-head">
+        <div>
+          <h3 id="cfBreakdownTitle">Cash Flow Breakdown</h3>
+          <p>Operating inflow vs investing &amp; financing outflows</p>
+        </div>
+        <span class="cf-unit-tag" id="cfBreakdownTag"></span>
+      </div>
+      <div class="cf-chart" id="cfBreakdownChart"></div>
+    </div>
+  </section>
+
+  <section class="cf-card">
+    <div class="cf-table-head">
+      <div>
+        <h3>Statement of Cash Flows</h3>
+        <p>Line items grouped by operating, investing and financing activities</p>
+      </div>
+      <div class="cf-table-controls">
+        <input type="text" id="cfSearch" placeholder="Filter line item (e.g. 'Dividends')&hellip;" oninput="renderTable(this.value)">
+        <button type="button" class="cf-link-btn" onclick="clearSearch()">Reset</button>
+      </div>
+    </div>
+    <div class="cf-table-wrap">
+      <table class="cf-table" id="cfTable">
+        <thead id="cfTableHead"></thead>
+        <tbody id="cfTableBody"></tbody>
+      </table>
+    </div>
+    <div class="cf-table-foot">
+      <span>* Figures in parentheses <b class="cf-neg-text">( )</b> represent cash outflows or negative net amounts.</span>
+      <span id="cfSource">Source: annual cash flow statements on disk (data/cashflow)</span>
+    </div>
+  </section>
+
+  <section class="cf-card cf-insights">
+    <h3>Key Insights</h3>
+    <ul id="cfSummary"></ul>
+  </section>
+</main>
+
+<script>
+const TICKER = {{ ticker | tojson }};
+let payload = null;
+let unit = "crores";
+
+const div = () => (unit === "crores" ? 1e7 : 1e6);
+const unitShort = () => (unit === "crores" ? " Cr" : " M");
+const unitLong = () => (unit === "crores" ? "₹ in Crores" : "₹ in Millions");
+
+function fmt(v, opts) {
+  opts = opts || {};
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  const n = v / div();
+  const sym = opts.symbol === false ? "" : "₹";
+  const body = Math.abs(n).toLocaleString("en-IN", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2
+  });
+  return n < 0 ? "(" + sym + body + ")" : sym + body;
+}
+
+function fmtSigned(v) {
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  const n = v / div();
+  const body = Math.abs(n).toLocaleString("en-IN", {
+    minimumFractionDigits: Math.abs(n) >= 100 ? 0 : 1,
+    maximumFractionDigits: Math.abs(n) >= 100 ? 0 : 1
+  });
+  return (n >= 0 ? "+₹" : "-₹") + body;
+}
+
+function fmtPct(v) {
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  return (v >= 0 ? "+" : "") + v.toFixed(1) + "%";
+}
+
+function goBack() {
+  const ref = document.referrer;
+  if (ref && ref.indexOf(location.origin) === 0) history.back();
+  else location.href = "/";
+}
+
+function setUnit(next) {
+  unit = next;
+  document.getElementById("cfUnitCr").classList.toggle("active", unit === "crores");
+  document.getElementById("cfUnitMn").classList.toggle("active", unit === "millions");
+  document.getElementById("cfUnitLabel").textContent = unitLong();
+  document.querySelectorAll(".chart-unit").forEach(el => {
+    el.textContent = unit === "crores" ? "₹ Cr" : "₹ Mn";
+  });
+  renderKPIs();
+  renderTable(document.getElementById("cfSearch").value);
+  renderCharts();
+}
+
+function renderKPIs() {
+  const grid = document.getElementById("cfKpis");
+  grid.innerHTML = payload.kpis.map(k => {
+    let badge = "";
+    if (k.cash_delta) {
+      badge = '<span class="cf-kpi-delta ' + (k.delta >= 0 ? "up" : "down") + '">' +
+        fmtSigned(k.delta) + unitShort() + "</span>";
+    } else if (k.yoy_pct !== null && k.yoy_pct !== undefined) {
+      badge = '<span class="cf-kpi-delta ' + (k.yoy_pct >= 0 ? "up" : "down") + '">' +
+        fmtPct(k.yoy_pct) + " YoY</span>";
+    } else {
+      badge = '<span class="cf-kpi-delta flat">YoY n/a</span>';
+    }
+    const prior = (k.prior_period && k.prior !== null && k.prior !== undefined)
+      ? '<span class="cf-kpi-prior">vs ' + k.prior_period.replace("FY ", "FY") +
+        " (" + fmt(k.prior) + unitShort() + ")</span>"
+      : "";
+    return '<div class="cf-kpi-card">' +
+      '<div class="cf-kpi-label">' + k.label + "</div>" +
+      '<div class="cf-kpi-value">' + fmt(k.latest) + unitShort() + "</div>" +
+      '<div class="cf-kpi-foot">' + badge + prior + "</div>" +
+      "</div>";
+  }).join("");
+}
+
+function renderTable(filterQuery) {
+  const query = (filterQuery || "").toLowerCase().trim();
+  const periods = payload.periods;
+  const head = document.getElementById("cfTableHead");
+  const body = document.getElementById("cfTableBody");
+  const cols = 1 + periods.length;
+
+  head.innerHTML = "<tr>" +
+    '<th scope="col" class="cf-th-label">Cash Flow Line Item</th>' +
+    periods.map((p, i) => {
+      const last = i === periods.length - 1;
+      const d = new Date(p.date + "T00:00:00");
+      const pretty = isNaN(d) ? p.date :
+        d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+      return '<th scope="col" class="cf-th-num' + (last ? " cf-latest-col" : "") + '">' +
+        p.label + (last ? " (Latest)" : "") +
+        '<br><span class="cf-th-date' + (last ? " cf-latest-date" : "") + '">' + pretty + "</span></th>";
+    }).join("") + "</tr>";
+
+  const sectionLabels = {};
+  payload.sections.forEach(s => { sectionLabels[s.key] = s.title; });
+  let html = "";
+  let shown = 0;
+  let lastSection = null;
+
+  payload.sections.forEach(section => {
+    const rows = section.rows.filter(r => !query || r.label.toLowerCase().includes(query));
+    if (!rows.length) return;
+    if (!query && section.key !== lastSection) {
+      lastSection = section.key;
+      html += '<tr class="cf-section-row"><td colspan="' + cols + '">' +
+        section.title + "</td></tr>";
+    }
+    rows.forEach(r => {
+      shown++;
+      const rowClass = r.style === "grand" ? "cf-grand-row"
+        : r.style === "subtotal" ? "cf-subtotal-row"
+        : r.style === "highlight" ? "cf-highlight-row"
+        : "cf-row";
+      const labelClass = "cf-label" + (r.indent ? " cf-indent" : "") +
+        (r.style === "subtotal" || r.style === "grand" ? " cf-label-bold" : "");
+      html += '<tr class="' + rowClass + '"><td class="' + labelClass + '">' +
+        r.label + "</td>" +
+        r.values.map((v, i) => {
+          const last = i === r.values.length - 1;
+          const cls = "cf-num" + (v !== null && v < 0 ? " cf-neg" : "") +
+            (last ? " cf-latest-col" : "") + (v === null ? " cf-empty" : "");
+          return '<td class="' + cls + '">' + fmt(v, { symbol: false }) + "</td>";
+        }).join("") + "</tr>";
+    });
+  });
+
+  if (!shown) {
+    html = '<tr><td colspan="' + cols + '" class="cf-no-rows">' +
+      'No matching cash flow line items found for "' + (filterQuery || "") + '".</td></tr>';
+  }
+  body.innerHTML = html;
+}
+
+function clearSearch() {
+  document.getElementById("cfSearch").value = "";
+  renderTable("");
+}
+
+const TREND_COLORS = { ocf: "#6bcb77", fcf: "#00d2ff", ni: "#ff6b6b" };
+
+function trendData() {
+  const d = div();
+  return [
+    { type: "bar", name: "Operating Cash Flow",
+      x: payload.trend.labels, y: payload.trend.ocf.map(v => v / d),
+      marker: { color: TREND_COLORS.ocf, opacity: 0.85 }, corner: { radius: 4 } },
+    { type: "bar", name: "Free Cash Flow",
+      x: payload.trend.labels, y: payload.trend.fcf.map(v => v / d),
+      marker: { color: TREND_COLORS.fcf, opacity: 0.85 }, corner: { radius: 4 } },
+    { type: "scatter", mode: "lines+markers", name: "Net Income (PAT)",
+      x: payload.trend.labels, y: payload.trend.net_income.map(v => v / d),
+      line: { color: TREND_COLORS.ni, width: 2.5 }, marker: { size: 7 },
+      hoverlabel: { font: { color: "#ffffff", size: 12 } } },
+  ];
+}
+
+function breakdownData() {
+  const d = div();
+  return [{
+    type: "bar",
+    x: payload.breakdown.labels,
+    y: payload.breakdown.values.map(v => (v === null ? null : v / d)),
+    marker: {
+      color: ["#6bcb77", "#ff6b6b", "#ffd93d", "#7a5cff"],
+      opacity: 0.85
+    },
+    corner: { radius: 4 }
+  }];
+}
+
+function axisFormat() {
+  return {
+    gridcolor: "#1a1a28", zerolinecolor: "#2a2a3a",
+    tickfont: { color: "#888", size: 11 }
+  };
+}
+
+function baseLayout() {
+  return {
+    template: "plotly_dark",
+    paper_bgcolor: "#12121a",
+    plot_bgcolor: "#0e0e16",
+    font: { color: "#e0e0e0", family: "Segoe UI, system-ui, sans-serif" },
+    margin: { l: 60, r: 16, t: 34, b: 44 },
+    height: 320,
+    barmode: "group",
+    legend: {
+      orientation: "h", y: 1.12, x: 0, xanchor: "left",
+      font: { size: 11, color: "#aaa" }
+    },
+    hoverlabel: { bgcolor: "#1a1a2e", bordercolor: "#2a2a3a" },
+    xaxis: { gridcolor: "#16161f", tickfont: { color: "#aaa", size: 11 } },
+    yaxis: axisFormat()
+  };
+}
+
+function renderCharts() {
+  if (!payload) return;
+  const suffix = unit === "crores" ? "₹ Cr" : "₹ Mn";
+
+  const trendLayout = baseLayout();
+  trendLayout.yaxis = Object.assign(axisFormat(), {
+    title: { text: suffix, font: { color: "#555", size: 11 } }
+  });
+  Plotly.react("cfTrendChart", trendData(), trendLayout, {
+    displayModeBar: false, responsive: true
+  });
+
+  const bdLayout = baseLayout();
+  bdLayout.showlegend = false;
+  bdLayout.yaxis = Object.assign(axisFormat(), {
+    title: { text: suffix, font: { color: "#555", size: 11 } }
+  });
+  Plotly.react("cfBreakdownChart", breakdownData(), bdLayout, {
+    displayModeBar: false, responsive: true
+  });
+}
+
+function renderSummary() {
+  const ul = document.getElementById("cfSummary");
+  ul.innerHTML = (payload.summary || []).map(s => "<li>" + s + "</li>").join("");
+}
+
+function renderHeader() {
+  document.title = payload.name + " (" + payload.ticker + ") — Cash Flow Statement";
+  document.getElementById("cfName").textContent = payload.name;
+  document.getElementById("cfTicker").textContent = "NSE: " + payload.ticker.replace(".NS", "");
+  const sub = [payload.sector, payload.industry].filter(Boolean);
+  document.getElementById("cfSub").textContent =
+    "Consolidated annual statement of cash flows • last " +
+    payload.periods.length + " fiscal years" + (sub.length ? " • " + sub.join(" • ") : "");
+  const latest = payload.periods[payload.periods.length - 1];
+  if (latest) {
+    document.getElementById("cfBreakdownTitle").textContent =
+      latest.label + " Cash Flow Breakdown";
+    document.getElementById("cfBreakdownTag").textContent = latest.label;
+    document.getElementById("cfKpiTitle").textContent =
+      "Executive Cash Highlights (" + latest.label +
+      (payload.periods.length > 1 ? " vs " + payload.periods[payload.periods.length - 2].label : "") + ")";
+    document.getElementById("cfSource").textContent =
+      "Source: " + payload.ticker + " annual cash flow statement (" + latest.date + ")";
+  }
+}
+
+function exportCSV() {
+  if (!payload) return;
+  const d = div();
+  const headers = ["Line Item"].concat(
+    payload.periods.map(p => p.label + " (" + p.date + ")")
+  ).concat(["Unit: " + (unit === "crores" ? "CRORES" : "MILLIONS")]);
+  const lines = [headers.map(csvCell).join(",")];
+
+  payload.sections.forEach(section => {
+    lines.push([csvCell(section.title)].concat(payload.periods.map(() => "")).join(","));
+    section.rows.forEach(r => {
+      const cells = [csvCell(r.label)].concat(r.values.map(v =>
+        v === null || v === undefined ? "" : (v / d).toFixed(2)
+      ));
+      lines.push(cells.join(","));
+    });
+  });
+
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = payload.ticker + "_Cash_Flow_Statement_" +
+    (unit === "crores" ? "Crores" : "Millions") + ".csv";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(link.href);
+}
+
+function csvCell(text) {
+  return '"' + String(text).replace(/"/g, '""') + '"';
+}
+
+function showError(message) {
+  const box = document.getElementById("cfError");
+  box.textContent = message;
+  box.style.display = "block";
+  document.getElementById("cfName").textContent = "Cash Flow Statement";
+}
+
+async function load() {
+  try {
+    const resp = await fetch("/api/cashflow/" + encodeURIComponent(TICKER));
+    const data = await resp.json();
+    if (!resp.ok || data.error) throw new Error(data.error || ("HTTP " + resp.status));
+    payload = data;
+    renderHeader();
+    renderKPIs();
+    renderTable("");
+    renderSummary();
+    renderCharts();
+  } catch (err) {
+    showError("Could not load the cash flow statement: " + err.message);
+  }
+}
+
+load();
+</script>
+</body>
+</html>

@@ -95,4 +95,4 @@ def sentiment_analysis(ticker: str) -> dict:
         if spread > 50:
             summary.append(f"Wide target range ({spread:.0f}% of price) — high uncertainty among analysts.")
 
-    return make_result(metrics, fig_to_html(fig), append_as_of(summary, row))
+    return make_result(metrics, fig_to_html(fig), append_as_of(summary, row, fields=[]))

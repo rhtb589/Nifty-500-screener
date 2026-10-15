@@ -24,5 +24,12 @@ ANALYSIS_MAP = {
     11: ("Stock Screener & Filter", nifty500_screener_tool),
 }
 
+# Sidebar order: the 10 model analyses, then the statement dashboards, then
+# Ask AI last. The visible numbers in the sidebar are the list positions
+# (rendered via Jinja's loop.index), so they always read 1..N even though the
+# internal ids are 12/13/14 for the statements and 11 for Ask AI.
 ANALYSIS_LIST = [{"id": k, "name": v[0]} for k, v in sorted(ANALYSIS_MAP.items()) if k != 11]
+ANALYSIS_LIST.append({"id": 12, "name": "Cash Flow Statement"})
+ANALYSIS_LIST.append({"id": 13, "name": "Balance Sheet"})
+ANALYSIS_LIST.append({"id": 14, "name": "Income Statement"})
 ANALYSIS_LIST.append({"id": 11, "name": "Ask AI"})

@@ -33,7 +33,8 @@ def composite_analysis(ticker: str) -> dict:
     ticker = resolve_ticker(ticker.upper().strip())
     if ticker not in df.index:
         raise ValueError(f"Ticker '{ticker}' not found in Nifty 500 data.")
-    row = df.loc[ticker]
+    # Display metrics only — factor ranks below come from the full universe.
+    row = get_row(ticker)
 
     pe = pd.to_numeric(df["trailingPE"], errors="coerce")
     inv_pe = (1 / pe).where(pe.abs() > 0)
@@ -138,4 +139,7 @@ def composite_analysis(ticker: str) -> dict:
         else:
             summary.append("Bottom-half composite score — multiple factors below average.")
 
-    return make_result(metrics, fig_to_html(fig), append_as_of(summary, row))
+    return make_result(
+        metrics, fig_to_html(fig),
+        append_as_of(summary, row, fields=["trailingPE", "returnOnEquity"]),
+    )

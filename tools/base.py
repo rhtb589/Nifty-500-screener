@@ -5,6 +5,11 @@ import plotly.graph_objects as go
 import plotly.io as pio
 from plotly.subplots import make_subplots
 
+from .financials import (
+    statement_metrics, derived_labels,
+    reset_caches as _reset_financial_caches,
+)
+
 CSV_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "nifty_500_data.csv")
 STOCK_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "stock_data")
 SNAPSHOT_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "latest_snapshot.csv")
@@ -14,6 +19,23 @@ _all_data = None
 _history_cache: dict = {}
 _universe_tech = None
 _shortname_map: dict | None = None
+
+
+def reset_caches():
+    """Drop every in-memory CSV cache.
+
+    Called by POST /api/reload after scheduler.py rewrites the data files,
+    so the long-running app serves the fresh fundamentals/technicals
+    without a process restart.
+    """
+    global _fund_data, _all_data, _universe_tech, _shortname_map, _enriched_universe
+    _fund_data = None
+    _all_data = None
+    _universe_tech = None
+    _shortname_map = None
+    _enriched_universe = None
+    _history_cache.clear()
+    _reset_financial_caches()
 
 
 def _load_fundamentals():
@@ -103,6 +125,51 @@ def get_ticker_options() -> list[dict]:
     return options
 
 
+def _is_missing(val) -> bool:
+    """True when a snapshot cell holds no usable number (NaN / None / '')."""
+    if val is None:
+        return True
+    if isinstance(val, str) and not val.strip():
+        return True
+    return not np.isfinite(safe_float(val))
+
+
+def apply_statement_fallback(row: pd.Series, ticker: str) -> pd.Series:
+    """Fill NaN fundamental fields from the ticker's statements under data/.
+
+    Snapshot values always win — only empty cells are filled. Filled keys are
+    recorded in row.attrs["_derived"] so append_as_of() can disclose them.
+    """
+    row = row.copy()
+    price = safe_float(row.get("currentPrice"))
+    if not np.isfinite(price):
+        price = safe_float(row.get("regularMarketPrice"))
+    market_cap = safe_float(row.get("marketCap"))
+    ev = safe_float(row.get("enterpriseValue"))
+
+    # P/E is derivable from the TTM EPS the snapshot already carries
+    # (trailingPE is blank for a few tickers while trailingEps is present).
+    if _is_missing(row.get("trailingPE")) and np.isfinite(price):
+        eps = safe_float(row.get("trailingEps"))
+        if np.isfinite(eps) and eps > 0:
+            row["trailingPE"] = price / eps
+
+    values, filled = statement_metrics(
+        ticker, price=price, market_cap=market_cap, enterprise_value=ev,
+    )
+    if not filled:
+        return row
+
+    newly = []
+    for key, val in values.items():
+        if _is_missing(row.get(key)):
+            row[key] = val
+            newly.append(key)
+    if newly:
+        row.attrs["_derived"] = newly
+    return row
+
+
 def get_row(ticker: str) -> pd.Series:
     df = _load_all()
     key = resolve_ticker(ticker)
@@ -113,7 +180,7 @@ def get_row(ticker: str) -> pd.Series:
     # downstream `row.get(...) or ...` truthiness check.
     if isinstance(row, pd.DataFrame):
         row = row.iloc[0]
-    return row
+    return apply_statement_fallback(row.copy(), key)
 
 
 def safe_float(val, default=np.nan):
@@ -313,10 +380,15 @@ def percentile_rank_series(series) -> pd.Series:
     return s.rank(pct=True)
 
 
-def append_as_of(summary: list, row) -> list:
+def append_as_of(summary: list, row, fields=None) -> list:
     """Append 'Data as of <date>' to an analysis summary when the row carries
     an As_of value from latest_snapshot.csv. Returns the summary unchanged
-    otherwise. Accepts a pandas Series or any mapping with .get()."""
+    otherwise. Accepts a pandas Series or any mapping with .get().
+
+    Also discloses metrics that were derived from the statements in data/
+    because the snapshot left them empty (see apply_statement_fallback).
+    `fields` narrows the note to the row keys the caller actually displays;
+    None lists every derived key on the row."""
     try:
         v = row.get("As_of")
     except AttributeError:
@@ -324,6 +396,16 @@ def append_as_of(summary: list, row) -> list:
     s = "" if v is None else str(v).strip()
     if s and s.lower() not in ("nan", "nat", "none"):
         summary.append(f"Data as of {s}")
+    derived = list(getattr(row, "attrs", {}).get("_derived") or [])
+    if fields is not None:
+        wanted = set(fields)
+        derived = [k for k in derived if k in wanted]
+    if derived:
+        labels = derived_labels(derived)
+        summary.append(
+            "Derived from statements in data/ (missing in snapshot): "
+            + ", ".join(labels) + "."
+        )
     return summary
 
 

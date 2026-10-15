@@ -17,8 +17,10 @@
   <div class="sidebar-section">Analysis Models</div>
   <ul class="analysis-list" id="analysisList">
     {% for a in analyses %}
+    {# data-id is the internal analysis id (11 = Ask AI, 12-14 = statements);
+       the visible number is the position in the list so it always reads 1..N. #}
     <li class="analysis-item" data-id="{{ a.id }}" onclick="selectAnalysis({{ a.id }}, this)">
-      <span class="num">{{ a.id }}</span>{{ a.name }}
+      <span class="num">{{ loop.index }}</span>{{ a.name }}
     </li>
     {% endfor %}
   </ul>
@@ -40,10 +42,18 @@
 
   <div class="stock-overview" id="stockOverview" style="display:none">
     <div class="overview-header">
-      <h2 id="overviewTicker"></h2>
-      <span class="company-name" id="overviewName"></span>
-      <span class="sector-tag" id="overviewSector"></span>
-      <span class="industry-tag" id="overviewIndustry"></span>
+      <div class="overview-header-top">
+        <div class="overview-tags">
+          <h2 id="overviewTicker"></h2>
+          <span class="company-name" id="overviewName"></span>
+          <span class="sector-tag" id="overviewSector"></span>
+          <span class="industry-tag" id="overviewIndustry"></span>
+        </div>
+        <div class="overview-btns">
+          <a class="cf-link-btn" id="overviewCashFlowBtn" href="#" onclick="event.preventDefault(); openCashFlow();">Cash Flow &rarr;</a>
+          <a class="cf-link-btn" id="overviewBalanceSheetBtn" href="#" onclick="event.preventDefault(); openBalanceSheet();">Balance Sheet &rarr;</a>
+        </div>
+      </div>
     </div>
     <div class="metrics-grid" id="overviewMetrics"></div>
   </div>
@@ -86,6 +96,56 @@ let selectedAnalysis = null;
 let selectedTicker = null;
 let chatHistory = [];
 
+const CHAT_HISTORY_KEY = "nifty500.chat.v1";
+const LAST_TICKER_KEY = "nifty500.lastTicker.v1";
+
+// History is stored per ticker (plus a "GENERAL" bucket when no stock is
+// selected) so follow-up questions always keep their original context, and so
+// the conversation survives page reloads and the statement dashboards, which
+// navigate away to separate pages.
+function chatStoreKey() {
+  return CHAT_HISTORY_KEY + "." + (selectedTicker || "GENERAL");
+}
+
+function loadChatHistory() {
+  try {
+    const raw = localStorage.getItem(chatStoreKey());
+    const parsed = raw ? JSON.parse(raw) : [];
+    chatHistory = Array.isArray(parsed)
+      ? parsed.filter(m => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+      : [];
+  } catch (e) {
+    console.warn("[chat] could not restore history:", e);
+    chatHistory = [];
+  }
+  renderChatMessages();
+}
+
+function saveChatHistory() {
+  const trimmed = chatHistory.slice(-200);
+  try {
+    localStorage.setItem(chatStoreKey(), JSON.stringify(trimmed));
+  } catch (e) {
+    // Quota exceeded — keep only the most recent turns.
+    try { localStorage.setItem(chatStoreKey(), JSON.stringify(trimmed.slice(-40))); } catch (e2) {}
+  }
+}
+
+function rememberLastTicker(ticker) {
+  try {
+    if (ticker) localStorage.setItem(LAST_TICKER_KEY, ticker);
+  } catch (e) { /* ignore */ }
+}
+
+function restoreLastTicker() {
+  if (selectedTicker || searchInput.value.trim()) return;
+  let last = null;
+  try { last = localStorage.getItem(LAST_TICKER_KEY); } catch (e) { return; }
+  if (!last) return;
+  const match = tickers.find(o => o.symbol === last);
+  if (match) pickTicker(match);
+}
+
 const searchInput = document.getElementById("searchInput");
 const dropdown = document.getElementById("dropdown");
 let activeIdx = -1;
@@ -101,6 +161,7 @@ function loadTickers(retries) {
       tickers = d.filter(o => o && o.symbol);
       tickersState = "ready";
       renderDropdown();
+      restoreLastTicker();
     })
     .catch(err => {
       console.error("[tickers] load failed:", err);
@@ -132,6 +193,33 @@ function selectAnalysis(id, el) {
 
   if (id === 11) {
     showChatView();
+  } else if (id === 12) {
+    hideChatView();
+    if (selectedTicker) {
+      openCashFlow();
+    } else {
+      document.getElementById("errorBox").textContent = "Please select a ticker first.";
+      document.getElementById("errorBox").style.display = "block";
+      document.getElementById("errorBox").scrollIntoView({behavior: 'smooth', block: 'center'});
+    }
+  } else if (id === 13) {
+    hideChatView();
+    if (selectedTicker) {
+      openBalanceSheet();
+    } else {
+      document.getElementById("errorBox").textContent = "Please select a ticker first.";
+      document.getElementById("errorBox").style.display = "block";
+      document.getElementById("errorBox").scrollIntoView({behavior: 'smooth', block: 'center'});
+    }
+  } else if (id === 14) {
+    hideChatView();
+    if (selectedTicker) {
+      openIncomeStatement();
+    } else {
+      document.getElementById("errorBox").textContent = "Please select a ticker first.";
+      document.getElementById("errorBox").style.display = "block";
+      document.getElementById("errorBox").scrollIntoView({behavior: 'smooth', block: 'center'});
+    }
   } else {
     hideChatView();
     if (selectedTicker) {
@@ -144,6 +232,33 @@ function selectAnalysis(id, el) {
       document.getElementById("errorBox").scrollIntoView({behavior: 'smooth', block: 'center'});
     }
   }
+}
+
+function openCashFlow() {
+  if (!selectedTicker) {
+    document.getElementById("errorBox").textContent = "Please select a ticker first.";
+    document.getElementById("errorBox").style.display = "block";
+    return;
+  }
+  window.location.href = "/cashflow/" + encodeURIComponent(selectedTicker);
+}
+
+function openBalanceSheet() {
+  if (!selectedTicker) {
+    document.getElementById("errorBox").textContent = "Please select a ticker first.";
+    document.getElementById("errorBox").style.display = "block";
+    return;
+  }
+  window.location.href = "/balance_sheet/" + encodeURIComponent(selectedTicker);
+}
+
+function openIncomeStatement() {
+  if (!selectedTicker) {
+    document.getElementById("errorBox").textContent = "Please select a ticker first.";
+    document.getElementById("errorBox").style.display = "block";
+    return;
+  }
+  window.location.href = "/income_statement/" + encodeURIComponent(selectedTicker);
 }
 
 function hideChatView() {
@@ -246,6 +361,7 @@ searchInput.addEventListener("input", function() {
   activeIdx = -1;
   if (selectedTicker && this.value.trim() !== selectedTicker) {
     selectedTicker = null;
+    loadChatHistory();   // switch to the general (no-stock) conversation
     updateChatContext();
     if (document.getElementById("chatView").style.display !== "flex") {
       document.getElementById("stockOverview").style.display = "none";
@@ -265,6 +381,8 @@ function pickTicker(o) {
   selectedTicker = o.symbol;
   searchInput.value = o.symbol;
   setDropdownVisible(false);
+  rememberLastTicker(selectedTicker);
+  loadChatHistory();   // restore this ticker's saved conversation
   updateChatContext();
   loadStockOverview(o.symbol);
   document.getElementById("emptyState").style.display = "none";
@@ -462,6 +580,7 @@ async function sendChat() {
 
   input.value = "";
   chatHistory.push({role: "user", content: msg});
+  saveChatHistory();
   renderChatMessages();
 
   document.getElementById("chatSend").disabled = true;
@@ -485,6 +604,7 @@ async function sendChat() {
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
     chatHistory.push({role: "assistant", content: data.reply});
+    saveChatHistory();
     renderChatMessages();
   } catch(err) {
     clearTimeout(timeoutId);
@@ -492,6 +612,7 @@ async function sendChat() {
       ? "Request timed out. The LLM took too long to respond."
       : "Error: " + err.message;
     chatHistory.push({role: "assistant", content: errMsg});
+    saveChatHistory();
     renderChatMessages();
   } finally {
     document.getElementById("chatSend").disabled = false;

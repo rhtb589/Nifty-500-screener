@@ -4,9 +4,9 @@
 # the committed latest_snapshot.csv always carries current fundamentals +
 # fresh technicals whenever CI/CD runs.
 #
-# Data files are committed back to the repo; the trailing Docker block is a
-# ready-to-uncomment placeholder so this workflow can build/push the app
-# image as soon as a Dockerfile is added (no other changes required).
+# Data files are committed back to the repo, then the refreshed image
+# (Dockerfile bakes the fresh data in) is built and pushed to GHCR with
+# :latest and :YYYYMMDD tags.
 
 name: Daily data update
 
@@ -65,14 +65,14 @@ jobs:
           fi
 
       # ------------------------------------------------------------------
-      # DOCKER INTEGRATION - enable once the Dockerfile exists:
-      # uncomment the block below (permissions are already granted above).
+      # Docker: build the image with the freshly refreshed data baked in,
+      # then push to GHCR (:latest + date tag).
       # ------------------------------------------------------------------
-      # - name: Build & push image to GHCR
-      #   run: |
-      #     REPO_LC="$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
-      #     IMAGE="ghcr.io/${REPO_LC}"
-      #     docker build -t "$IMAGE:latest" -t "$IMAGE:$(date -u +%Y%m%d)" .
-      #     echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-      #     docker push "$IMAGE:latest"
-      #     docker push "$IMAGE:$(date -u +%Y%m%d)"
+      - name: Build & push image to GHCR
+        run: |
+          REPO_LC="$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          IMAGE="ghcr.io/${REPO_LC}"
+          docker build -t "$IMAGE:latest" -t "$IMAGE:$(date -u +%Y%m%d)" .
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push "$IMAGE:latest"
+          docker push "$IMAGE:$(date -u +%Y%m%d)"

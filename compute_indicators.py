@@ -11,6 +11,10 @@ import pandas_ta as ta
 
 STOCK_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stock_data")
 
+# Columns every stock file must start from; everything else is a previously
+# computed indicator that this script regenerates.
+BASE_COLS = ["Open", "High", "Low", "Close", "Volume", "Dividends", "Stock Splits"]
+
 
 def compute_moving_averages(df):
     """Compute all moving average indicators."""
@@ -361,6 +365,13 @@ def process_stock(filepath):
 
     # Drop any all-NaN rows
     df = df.dropna(how="all")
+
+    # Strip previously computed indicators first: re-running on an already
+    # enriched file (e.g. left over from a failed download step) would make
+    # pd.concat below append duplicate column names on every pass.
+    keep = [c for c in BASE_COLS if c in df.columns]
+    if len(keep) != len(df.columns):
+        df = df[keep]
 
     try:
         df = compute_moving_averages(df)

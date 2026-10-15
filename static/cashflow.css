@@ -1,0 +1,560 @@
+/* Dark theme Cash Flow Statement dashboard — matches style.css palette */
+
+:root {
+  --bg: #0a0a0f;
+  --card: #12121a;
+  --card-2: #16161f;
+  --border: #1e1e2e;
+  --border-2: #2a2a3a;
+  --text: #e0e0e0;
+  --muted: #888;
+  --faint: #555;
+  --accent: #00d2ff;
+  --accent-2: #7a5cff;
+  --green: #6bcb77;
+  --red: #ff6b6b;
+  --amber: #ffd93d;
+  --mono: "Cascadia Mono", "Consolas", "SF Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+
+body.cf-page,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ---------- header ---------- */
+
+.cf-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 18px 28px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, #101018 0%, var(--bg) 100%);
+}
+
+.cf-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.cf-back {
+  background: var(--card);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.cf-back:hover {
+  color: var(--text);
+  border-color: var(--border-2);
+}
+
+.cf-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cf-title-row h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.cf-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.cf-badge-ticker { color: var(--accent); }
+
+.cf-badge-live { color: var(--green); }
+
+.cf-badge-live .cf-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  vertical-align: 1px;
+}
+
+.cf-sub {
+  margin: 4px 0 0;
+  color: var(--faint);
+  font-size: 12.5px;
+}
+
+.cf-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cf-toggle {
+  display: inline-flex;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.cf-toggle button {
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.cf-toggle button:hover { color: var(--text); }
+
+.cf-toggle button.active {
+  background: linear-gradient(135deg, rgba(0, 210, 255, 0.18), rgba(122, 92, 255, 0.18));
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.cf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--card);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.cf-btn:hover {
+  color: var(--text);
+  border-color: var(--border-2);
+}
+
+.cf-btn svg { width: 15px; height: 15px; }
+
+/* ---------- layout ---------- */
+
+.cf-main {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 26px 28px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.cf-error {
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.35);
+  color: var(--red);
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+
+.cf-block-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 12px;
+}
+
+.cf-block-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  color: #fff;
+}
+
+.cf-unit-note {
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.cf-unit-note b { color: var(--muted); font-weight: 600; }
+
+/* ---------- KPI cards ---------- */
+
+.cf-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.cf-kpi-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  position: relative;
+  overflow: hidden;
+}
+
+.cf-kpi-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  opacity: 0.7;
+}
+
+.cf-kpi-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+
+.cf-kpi-value {
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 21px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.cf-kpi-foot {
+  margin-top: 9px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cf-kpi-delta {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.cf-kpi-delta.up {
+  color: var(--green);
+  background: rgba(107, 203, 119, 0.12);
+}
+
+.cf-kpi-delta.down {
+  color: var(--red);
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.cf-kpi-delta.flat {
+  color: var(--faint);
+  background: rgba(136, 136, 136, 0.1);
+}
+
+.cf-kpi-prior {
+  font-size: 11.5px;
+  color: var(--faint);
+  font-family: var(--mono);
+}
+
+/* ---------- cards / charts ---------- */
+
+.cf-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+}
+
+.cf-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+@media (max-width: 980px) {
+  .cf-charts { grid-template-columns: 1fr; }
+}
+
+.cf-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.cf-card-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: #fff;
+}
+
+.cf-card-head p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.cf-unit-tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  background: rgba(0, 210, 255, 0.1);
+  border: 1px solid rgba(0, 210, 255, 0.25);
+  border-radius: 6px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.cf-chart {
+  width: 100%;
+  height: 320px;
+}
+
+/* ---------- table ---------- */
+
+.cf-table-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.cf-table-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: #fff;
+}
+
+.cf-table-head p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.cf-table-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cf-table-controls input {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 8px 12px;
+  font-size: 13px;
+  width: 240px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.cf-table-controls input::placeholder { color: var(--faint); }
+.cf-table-controls input:focus { border-color: var(--accent); }
+
+.cf-link-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cf-link-btn:hover { color: var(--text); }
+
+.cf-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.cf-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+  font-size: 13px;
+}
+
+.cf-table thead th {
+  background: var(--card-2);
+  color: var(--muted);
+  font-weight: 600;
+  text-align: right;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+}
+
+.cf-th-label { text-align: left !important; }
+
+.cf-th-num { text-align: right; }
+
+.cf-th-date {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--faint);
+}
+
+.cf-latest-col { background: rgba(0, 210, 255, 0.05); }
+
+.cf-latest-date {
+  color: var(--accent);
+}
+
+.cf-section-row td {
+  background: rgba(122, 92, 255, 0.1);
+  color: var(--accent-2);
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 9px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.cf-section-row + tr td { border-top: 0; }
+
+.cf-row td,
+.cf-subtotal-row td,
+.cf-grand-row td,
+.cf-highlight-row td {
+  padding: 9px 14px;
+  border-top: 1px solid rgba(30, 30, 46, 0.7);
+}
+
+.cf-row:hover td { background: rgba(255, 255, 255, 0.02); }
+
+.cf-label {
+  color: var(--text);
+  text-align: left;
+  padding-left: 18px;
+  min-width: 320px;
+}
+
+.cf-indent { padding-left: 38px !important; }
+
+.cf-label-bold { font-weight: 650; color: #fff; }
+
+.cf-subtotal-row td {
+  background: rgba(255, 255, 255, 0.025);
+  font-weight: 600;
+}
+
+.cf-subtotal-row .cf-label { color: #fff; }
+
+.cf-grand-row td {
+  background: rgba(0, 210, 255, 0.06);
+  font-weight: 700;
+  border-top: 1px solid rgba(0, 210, 255, 0.25);
+}
+
+.cf-grand-row .cf-label { color: var(--accent); }
+
+.cf-highlight-row .cf-label { color: var(--green); }
+
+.cf-num {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  text-align: right;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.cf-neg { color: var(--red); }
+.cf-empty { color: var(--faint); }
+
+.cf-no-rows {
+  text-align: center;
+  color: var(--muted);
+  padding: 26px 14px !important;
+}
+
+.cf-table-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.cf-neg-text { color: var(--red); }
+
+/* ---------- insights ---------- */
+
+.cf-insights h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 650;
+  color: #fff;
+}
+
+.cf-insights ul {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.cf-insights li::marker { color: var(--accent); }
+
+/* ---------- print ---------- */
+
+@media print {
+  body { background: #fff; color: #000; }
+  .cf-header { background: none; border-color: #ccc; }
+  .cf-controls, .cf-back, .cf-table-controls { display: none !important; }
+  .cf-main { padding: 12px 0; max-width: none; }
+  .cf-card, .cf-kpi-card, .cf-table-wrap { border-color: #ccc; background: #fff; }
+  .cf-title-row h1, .cf-block-head h2, .cf-card-head h3,
+  .cf-insights h3, .cf-kpi-value, .cf-label-bold,
+  .cf-subtotal-row .cf-label { color: #000 !important; }
+  .cf-section-row td { background: #eee !important; color: #333 !important; }
+  .cf-grand-row .cf-label { color: #006 !important; }
+  .cf-num { color: #000 !important; }
+  .cf-neg { color: #a00 !important; }
+  .cf-th-num, .cf-th-date { color: #444 !important; }
+  .cf-kpi-delta.up { color: #060 !important; background: none; }
+  .cf-kpi-delta.down { color: #a00 !important; background: none; }
+  .cf-charts { grid-template-columns: 1fr 1fr; }
+  .cf-latest-col { background: #f4f4ff; }
+}

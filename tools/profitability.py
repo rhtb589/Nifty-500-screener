@@ -97,4 +97,10 @@ def profitability_analysis(ticker: str) -> dict:
     if np.isfinite(margin) and margin < 0.05:
         summary.append(f"Thin net margin ({margin_pct:.1f}%) — high sensitivity to cost shocks.")
 
-    return make_result(metrics, fig_to_html(fig), append_as_of(summary, row))
+    return make_result(
+        metrics, fig_to_html(fig),
+        append_as_of(summary, row, fields=[
+            "returnOnEquity", "returnOnAssets", "profitMargins", "grossMargins",
+            "operatingMargins", "ebitdaMargins", "revenuePerShare",
+        ]),
+    )

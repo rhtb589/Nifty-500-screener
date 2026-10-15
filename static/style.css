@@ -82,6 +82,12 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#0a0a0
 .sector-tag,.industry-tag{display:inline-block;padding:3px 10px;border-radius:6px;font-size:.7rem;font-weight:600}
 .sector-tag{background:rgba(0,210,255,.1);color:#00d2ff}
 .industry-tag{background:rgba(122,92,255,.1);color:#7a5cff}
+.overview-header-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;width:100%}
+.overview-tags{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.overview-tags h2{margin:0}
+.overview-btns{display:flex;gap:8px;flex-wrap:wrap}
+.cf-link-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;font-size:.85rem;font-weight:600;text-decoration:none;transition:all .15s;cursor:pointer;background:linear-gradient(135deg,rgba(0,210,255,.15),rgba(122,92,255,.15));color:#00d2ff;border:1px solid rgba(0,210,255,.3)}
+.cf-link-btn:hover{background:linear-gradient(135deg,rgba(0,210,255,.25),rgba(122,92,255,.25));border-color:rgba(0,210,255,.5)}
 
 /* Stock Chart */
 .overview-chart{margin-top:20px;border:1px solid #1e1e2e;border-radius:12px;overflow:hidden;background:#12121a;padding:8px}

@@ -109,4 +109,4 @@ def trend_analysis(ticker: str) -> dict:
     if np.isfinite(dist_200):
         summary.append(f"Price is {dist_200:+.1f}% vs its 200-day average.")
 
-    return make_result(metrics, fig_to_html(fig), append_as_of(summary, row))
+    return make_result(metrics, fig_to_html(fig), append_as_of(summary, row, fields=[]))

@@ -114,4 +114,4 @@ def breakout_analysis(ticker: str) -> dict:
         elif position_in_range < 20:
             summary.append(f"Trading in bottom {position_in_range:.0f}% of 52W range — near support.")
 
-    return make_result(metrics, fig_to_html(fig), append_as_of(summary, row))
+    return make_result(metrics, fig_to_html(fig), append_as_of(summary, row, fields=[]))

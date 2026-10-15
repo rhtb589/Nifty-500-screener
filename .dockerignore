@@ -1,0 +1,24 @@
+# VCS / nested repos
+.git/
+Nifty-500/
+
+# Secrets — never bake into the image
+.env
+
+# Python caches / envs
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Logs / scratch
+*.log
+compute_output.txt
+
+# Dev-only files
+test.ipynb
+.github/
+.dockerignore
+Dockerfile
+docker-compose.yml

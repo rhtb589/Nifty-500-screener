@@ -94,4 +94,10 @@ def solvency_analysis(ticker: str) -> dict:
     if np.isfinite(net_debt) and net_debt < 0:
         summary.append(f"Net cash position of \u20B9{abs(net_debt) / 1e7:,.0f} Cr — debt free after cash.")
 
-    return make_result(metrics, fig_to_html(fig), append_as_of(summary, row))
+    return make_result(
+        metrics, fig_to_html(fig),
+        append_as_of(summary, row, fields=[
+            "totalDebt", "totalCash", "totalCashPerShare", "debtToEquity",
+            "currentRatio", "quickRatio", "operatingCashflow", "freeCashflow",
+        ]),
+    )

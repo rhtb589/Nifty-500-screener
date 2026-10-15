@@ -94,4 +94,9 @@ def growth_analysis(ticker: str) -> dict:
         elif rg > eg + 0.05:
             summary.append("Revenue outpacing earnings — margin compression or rising costs.")
 
-    return make_result(metrics, fig_to_html(fig), append_as_of(summary, row))
+    return make_result(
+        metrics, fig_to_html(fig),
+        append_as_of(summary, row, fields=[
+            "earningsGrowth", "revenueGrowth", "earningsQuarterlyGrowth", "trailingPE",
+        ]),
+    )

@@ -124,4 +124,9 @@ def dividend_analysis(ticker: str) -> dict:
         else:
             summary.append("Yield near its 5Y average — fairly valued on dividend basis.")
 
-    return make_result(metrics, fig_to_html(fig), append_as_of(summary, row))
+    return make_result(
+        metrics, fig_to_html(fig),
+        append_as_of(summary, row, fields=[
+            "dividendRate", "payoutRatio", "freeCashflow", "operatingCashflow",
+        ]),
+    )

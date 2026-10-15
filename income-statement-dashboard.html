@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Income Statement Dashboard</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    @media print {
+      .no-print { display: none !important; }
+      body { background: #ffffff !important; color: #000000 !important; }
+    }
+    .font-mono {
+      font-family: ui-monospace, Menlo, Monaco, "Cascadia Mono", "Trebuchet MS", "sans-serif";
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans antialiased min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-xl tracking-tighter shadow-md shadow-indigo-200">
+          D
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg font-bold text-slate-900 leading-tight">Company Name Limited</h1>
+            <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded font-mono font-medium border border-slate-200">NSE: COMPANY</span>
+          </div>
+          <p class="text-xs text-slate-500">Statement of Profit and Loss (Income Statement) • Audited Standalone</p>
+        </div>
+      </div>
+
+      <div class="flex items-center space-x-3 no-print">
+        <!-- Scale Switcher -->
+        <div class="bg-slate-100 p-1 rounded-lg flex items-center text-xs font-semibold border border-slate-200">
+          <button id="btn-cr" onclick="setUnit('cr')" class="px-3 py-1.5 rounded-md bg-white text-slate-900 shadow-sm transition-all">₹ Crores</button>
+          <button id="btn-mn" onclick="setUnit('mn')" class="px-3 py-1.5 rounded-md text-slate-500 hover:text-slate-800 transition-all">₹ Millions</button>
+        </div>
+
+        <!-- Export CSV -->
+        <button onclick="exportCSV()" class="px-3.5 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-sm">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          Export CSV
+        </button>
+
+        <button onclick="window.print()" class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200">
+          Print
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- KPI Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Revenue (FY26)</p>
+        <h3 class="text-2xl font-black text-slate-900 mt-1" id="kpi-rev">₹5,086.95 Cr</h3>
+        <p class="text-xs text-emerald-600 font-semibold mt-1">↑ +14.50% <span class="text-slate-400 font-normal">vs FY25</span></p>
+      </div>
+
+      <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Gross Margin</p>
+        <h3 class="text-2xl font-black text-indigo-600 mt-1">40.12%</h3>
+        <p class="text-xs text-slate-400 font-medium mt-1">GP: <span id="kpi-gp" class="text-slate-600 font-semibold">₹2,040.78 Cr</span></p>
+      </div>
+
+      <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Operating Margin</p>
+        <h3 class="text-2xl font-black text-blue-600 mt-1">18.78%</h3>
+        <p class="text-xs text-slate-400 font-medium mt-1">EBITDA: <span id="kpi-ebitda" class="text-slate-600 font-semibold">₹999.78 Cr</span></p>
+      </div>
+
+      <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Net Profit (PAT)</p>
+        <h3 class="text-2xl font-black text-emerald-600 mt-1" id="kpi-pat">₹522.32 Cr</h3>
+        <p class="text-xs text-emerald-600 font-semibold mt-1">↑ +9.72% <span class="text-slate-400 font-normal">vs FY25</span></p>
+      </div>
+
+      <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Diluted EPS</p>
+        <h3 class="text-2xl font-black text-slate-900 mt-1">₹463.66</h3>
+        <p class="text-xs text-slate-400 font-medium mt-1">1.127 Cr Shares</p>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Revenue & Profitability (2 cols) -->
+      <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm lg:col-span-2">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-base font-bold text-slate-800">Revenue & Profitability Growth</h2>
+            <p class="text-xs text-slate-400">Topline vs. Operating Income vs. PAT (FY23–FY26)</p>
+          </div>
+          <span class="text-xs font-mono text-slate-500 bg-slate-100 px-2 py-1 rounded" id="chart-unit-tag">Unit: ₹ Crores</span>
+        </div>
+        <div class="h-64 sm:h-72">
+          <canvas id="incomeTrendChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Cost Breakdown Chart (1 col) -->
+      <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+        <div class="mb-4">
+          <h2 class="text-base font-bold text-slate-800">FY26 Expense Allocation</h2>
+          <p class="text-xs text-slate-400">Breakup of Total Revenue distribution</p>
+        </div>
+        <div class="h-64 sm:h-72 flex items-center justify-center">
+          <canvas id="costBreakdownChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Structured Statement Table -->
+    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+      <div class="p-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-base font-bold text-slate-900">Profit & Loss Statement</h2>
+          <p class="text-xs text-slate-500">For the fiscal years ended March 31, 2023 through March 31, 2026</p>
+        </div>
+        <div class="no-print">
+          <input 
+            type="text" 
+            id="searchInput" 
+            placeholder="Search line items..." 
+            onkeyup="filterTable()" 
+            class="px-3.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-400 text-slate-800 w-64"
+          />
+        </div>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs border-collapse" id="incomeTable">
+          <thead>
+            <tr class="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 uppercase tracking-wider">
+              <th class="py-3 px-6 text-left">Particulars</th>
+              <th class="py-3 px-6 text-right">31-Mar-2023</th>
+              <th class="py-3 px-6 text-right">31-Mar-2024</th>
+              <th class="py-3 px-6 text-right">31-Mar-2025</th>
+              <th class="py-3 px-6 text-right">31-Mar-2026</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 text-slate-700" id="tableBody">
+            <!-- Populated via Javascript -->
+          </tbody>
+        </table>
+      </div>
+      <div class="p-4 bg-slate-50 border-t border-slate-200 flex justify-between items-center text-xs text-slate-400 font-mono">
+        <span>* EPS values are in absolute Indian Rupees (₹ per share).</span>
+        <span>Figures in <span class="font-semibold text-slate-600" id="table-unit-tag">₹ Crores</span></span>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // Raw financial values in INR (converted to ₹ Crores and ₹ Millions dynamically)
+    const rawData = [
+      { name: "I. REVENUE FROM OPERATIONS", isHeader: true },
+      { name: "Operating Revenue", fy23: 39572800000, fy24: 41868700000, fy25: 44428600000, fy26: 50869500000 },
+      { name: "Total Revenue", isSubtotal: true, fy23: 39572800000, fy24: 41868700000, fy25: 44428600000, fy26: 50869500000 },
+
+      { name: "II. COST OF REVENUE & GROSS PROFIT", isHeader: true },
+      { name: "Cost Of Revenue (Raw Materials & Spares)", fy23: 25287600000, fy24: 25962500000, fy25: 27455200000, fy26: 30461700000 },
+      { name: "Gross Profit", isSubtotal: true, fy23: 14285200000, fy24: 15906200000, fy25: 16973400000, fy26: 20407800000 },
+
+      { name: "III. OPERATING EXPENSES", isHeader: true },
+      { name: "Selling, General & Administrative Expense", fy23: 8466600000, fy24: 8639200000, fy25: 9655400000, fy26: 10790400000 },
+      { name: "Other Operating Expenses", fy23: 59400000, fy24: 52900000, fy25: 55300000, fy26: 62600000 },
+      { name: "Total Operating Expenses", isSubtotal: true, fy23: 8526000000, fy24: 8692100000, fy25: 9710700000, fy26: 10853000000 },
+
+      { name: "IV. OPERATING RESULTS & EBITDA", isHeader: true },
+      { name: "Operating Income (EBIT)", isSubtotal: true, fy23: 5759200000, fy24: 7214100000, fy25: 7262700000, fy26: 9554800000 },
+      { name: "Depreciation & Amortization", fy23: 576800000, fy24: 529400000, fy25: 552900000, fy26: 626400000 },
+      { name: "EBITDA", isSubtotal: true, fy23: 6721500000, fy24: 8370800000, fy25: 8395000000, fy26: 9997800000 },
+
+      { name: "V. OTHER INCOME / (FINANCE COSTS)", isHeader: true },
+      { name: "Interest Income", fy23: 441700000, fy24: 692500000, fy25: 618700000, fy26: 457500000 },
+      { name: "Interest Expense", fy23: 13100000, fy24: 17300000, fy25: 108000000, fy26: 431100000 },
+      { name: "Other Special / Unusual Charges", fy23: -12800000, fy24: -13600000, fy25: -20300000, fy26: -335600000 },
+
+      { name: "VI. EARNINGS & TAXES", isHeader: true },
+      { name: "Pretax Income (PBT)", isSubtotal: true, fy23: 6074400000, fy24: 7812100000, fy25: 7734100000, fy26: 8940300000 },
+      { name: "Tax Provision", fy23: 1564200000, fy24: 1978000000, fy25: 2973400000, fy26: 3717100000 },
+      { name: "NET INCOME (PAT)", isTotal: true, fy23: 4510200000, fy24: 5834100000, fy25: 4760700000, fy26: 5223200000 },
+
+      { name: "VII. PER SHARE METRICS", isHeader: true },
+      { name: "Basic EPS (₹)", isEPS: true, fy23: 400.37, fy24: 517.90, fy25: 422.60, fy26: 463.66 },
+      { name: "Diluted EPS (₹)", isEPS: true, fy23: 400.37, fy24: 517.90, fy25: 422.60, fy26: 463.66 }
+    ];
+
+    let currentUnit = 'cr'; // 'cr' (10,000,000 INR) or 'mn' (1,000,000 INR)
+    let trendChart, costChart;
+
+    function formatNumber(val, isEPS = false) {
+      if (val === undefined || val === null) return "—";
+      if (isEPS) {
+        return "₹" + val.toFixed(2);
+      }
+      const divisor = currentUnit === 'cr' ? 1e7 : 1e6;
+      const converted = val / divisor;
+      const formatted = Math.abs(converted).toLocaleString("en-IN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+      return converted < 0 ? `(${formatted})` : formatted;
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById('tableBody');
+      tbody.innerHTML = '';
+
+      rawData.forEach(row => {
+        const tr = document.createElement('tr');
+        
+        if (row.isHeader) {
+          tr.className = "bg-slate-100/70 font-bold text-slate-800 text-[11px] uppercase tracking-wider";
+          tr.innerHTML = `<td colspan="5" class="py-2.5 px-6">${row.name}</td>`;
+        } else if (row.isTotal) {
+          tr.className = "bg-emerald-50/70 font-black text-slate-900 border-t-2 border-b-2 border-emerald-400 text-xs";
+          tr.innerHTML = `
+            <td class="py-3 px-6 text-emerald-950">${row.name}</td>
+            <td class="py-3 px-6 text-right font-mono text-emerald-950">${formatNumber(row.fy23, row.isEPS)}</td>
+            <td class="py-3 px-6 text-right font-mono text-emerald-950">${formatNumber(row.fy24, row.isEPS)}</td>
+            <td class="py-3 px-6 text-right font-mono text-emerald-950">${formatNumber(row.fy25, row.isEPS)}</td>
+            <td class="py-3 px-6 text-right font-mono text-emerald-950">${formatNumber(row.fy26, row.isEPS)}</td>
+          `;
+        } else if (row.isSubtotal) {
+          tr.className = "bg-slate-50 font-bold text-slate-800 border-t border-slate-200";
+          tr.innerHTML = `
+            <td class="py-2.5 px-6 pl-8">${row.name}</td>
+            <td class="py-2.5 px-6 text-right font-mono">${formatNumber(row.fy23, row.isEPS)}</td>
+            <td class="py-2.5 px-6 text-right font-mono">${formatNumber(row.fy24, row.isEPS)}</td>
+            <td class="py-2.5 px-6 text-right font-mono">${formatNumber(row.fy25, row.isEPS)}</td>
+            <td class="py-2.5 px-6 text-right font-mono">${formatNumber(row.fy26, row.isEPS)}</td>
+          `;
+        } else {
+          tr.className = "hover:bg-slate-50/70 transition-colors";
+          tr.innerHTML = `
+            <td class="py-2 px-6 pl-8 text-slate-600">${row.name}</td>
+            <td class="py-2 px-6 text-right font-mono text-slate-800">${formatNumber(row.fy23, row.isEPS)}</td>
+            <td class="py-2 px-6 text-right font-mono text-slate-800">${formatNumber(row.fy24, row.isEPS)}</td>
+            <td class="py-2 px-6 text-right font-mono text-slate-800">${formatNumber(row.fy25, row.isEPS)}</td>
+            <td class="py-2 px-6 text-right font-mono text-slate-800">${formatNumber(row.fy26, row.isEPS)}</td>
+          `;
+        }
+        tbody.appendChild(tr);
+      });
+
+      // Update unit labels
+      const unitText = currentUnit === 'cr' ? '₹ Crores' : '₹ Millions';
+      const unitSymbol = currentUnit === 'cr' ? 'Cr' : 'Mn';
+      document.getElementById('table-unit-tag').innerText = unitText;
+      document.getElementById('chart-unit-tag').innerText = `Unit: ${unitText}`;
+
+      // Update KPI Cards
+      const div = currentUnit === 'cr' ? 1e7 : 1e6;
+      document.getElementById('kpi-rev').innerText = `₹${(50869500000 / div).toLocaleString('en-IN', {maximumFractionDigits: 2})} ${unitSymbol}`;
+      document.getElementById('kpi-gp').innerText = `₹${(20407800000 / div).toLocaleString('en-IN', {maximumFractionDigits: 2})} ${unitSymbol}`;
+      document.getElementById('kpi-ebitda').innerText = `₹${(9997800000 / div).toLocaleString('en-IN', {maximumFractionDigits: 2})} ${unitSymbol}`;
+      document.getElementById('kpi-pat').innerText = `₹${(5223200000 / div).toLocaleString('en-IN', {maximumFractionDigits: 2})} ${unitSymbol}`;
+    }
+
+    function setUnit(unit) {
+      currentUnit = unit;
+      const btnCr = document.getElementById('btn-cr');
+      const btnMn = document.getElementById('btn-mn');
+
+      if (unit === 'cr') {
+        btnCr.className = "px-3 py-1.5 rounded-md bg-white text-slate-900 shadow-sm transition-all";
+        btnMn.className = "px-3 py-1.5 rounded-md text-slate-500 hover:text-slate-800 transition-all";
+      } else {
+        btnMn.className = "px-3 py-1.5 rounded-md bg-white text-slate-900 shadow-sm transition-all";
+        btnCr.className = "px-3 py-1.5 rounded-md text-slate-500 hover:text-slate-800 transition-all";
+      }
+
+      renderTable();
+      updateCharts();
+    }
+
+    function initCharts() {
+      const div = currentUnit === 'cr' ? 1e7 : 1e6;
+
+      // 1. Income Trend Chart
+      const ctxTrend = document.getElementById('incomeTrendChart').getContext('2d');
+      trendChart = new Chart(ctxTrend, {
+        type: 'bar',
+        data: {
+          labels: ['FY 2022-23', 'FY 2023-24', 'FY 2024-25', 'FY 2025-26'],
+          datasets: [
+            {
+              label: 'Total Revenue',
+              data: [39572800000 / div, 41868700000 / div, 44428600000 / div, 50869500000 / div],
+              backgroundColor: '#3b82f6',
+              borderRadius: 6,
+              order: 2
+            },
+            {
+              label: 'Gross Profit',
+              data: [14285200000 / div, 15906200000 / div, 16973400000 / div, 20407800000 / div],
+              backgroundColor: '#6366f1',
+              borderRadius: 6,
+              order: 2
+            },
+            {
+              label: 'Net Income (PAT)',
+              data: [4510200000 / div, 5834100000 / div, 4760700000 / div, 5223200000 / div],
+              type: 'line',
+              borderColor: '#10b981',
+              backgroundColor: '#10b981',
+              borderWidth: 3,
+              tension: 0.3,
+              order: 1
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ` ${ctx.dataset.label}: ₹${ctx.parsed.y.toLocaleString('en-IN', {maximumFractionDigits: 2})}`
+              }
+            }
+          },
+          scales: {
+            y: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 10 } } },
+            x: { grid: { display: false }, ticks: { font: { size: 11, weight: '500' } } }
+          }
+        }
+      });
+
+      // 2. Cost Distribution Doughnut Chart (FY26)
+      const ctxCost = document.getElementById('costBreakdownChart').getContext('2d');
+      costChart = new Chart(ctxCost, {
+        type: 'doughnut',
+        data: {
+          labels: ['Cost of Revenue', 'Operating SG&A', 'Taxes', 'Net Profit (PAT)'],
+          datasets: [{
+            data: [
+              30461700000 / div, 
+              10853000000 / div, 
+              3717100000 / div, 
+              5223200000 / div
+            ],
+            backgroundColor: ['#64748b', '#94a3b8', '#f43f5e', '#10b981'],
+            borderWidth: 2,
+            borderColor: '#ffffff'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ` ${ctx.label}: ₹${ctx.parsed.toLocaleString('en-IN', {maximumFractionDigits: 2})}`
+              }
+            }
+          },
+          cutout: '66%'
+        }
+      });
+    }
+
+    function updateCharts() {
+      const div = currentUnit === 'cr' ? 1e7 : 1e6;
+
+      trendChart.data.datasets[0].data = [39572800000 / div, 41868700000 / div, 44428600000 / div, 50869500000 / div];
+      trendChart.data.datasets[1].data = [14285200000 / div, 15906200000 / div, 16973400000 / div, 20407800000 / div];
+      trendChart.data.datasets[2].data = [4510200000 / div, 5834100000 / div, 4760700000 / div, 5223200000 / div];
+      trendChart.update();
+
+      costChart.data.datasets[0].data = [
+        30461700000 / div, 
+        10853000000 / div, 
+        3717100000 / div, 
+        5223200000 / div
+      ];
+      costChart.update();
+    }
+
+    function filterTable() {
+      const query = document.getElementById("searchInput").value.toLowerCase();
+      const rows = document.querySelectorAll("#tableBody tr");
+      rows.forEach(r => {
+        const text = r.children[0].innerText.toLowerCase();
+        if (text.includes(query)) {
+          r.style.display = "";
+        } else {
+          r.style.display = "none";
+        }
+      });
+    }
+
+    function exportCSV() {
+      const div = currentUnit === 'cr' ? 1e7 : 1e6;
+      const unitLabel = currentUnit === 'cr' ? 'INR_Crores' : 'INR_Millions';
+      let csv = `Particulars,31-Mar-2023 (${unitLabel}),31-Mar-2024 (${unitLabel}),31-Mar-2025 (${unitLabel}),31-Mar-2026 (${unitLabel})\n`;
+      
+      rawData.forEach(row => {
+        if (!row.isHeader) {
+          const v23 = row.isEPS ? row.fy23 : (row.fy23 / div).toFixed(2);
+          const v24 = row.isEPS ? row.fy24 : (row.fy24 / div).toFixed(2);
+          const v25 = row.isEPS ? row.fy25 : (row.fy25 / div).toFixed(2);
+          const v26 = row.isEPS ? row.fy26 : (row.fy26 / div).toFixed(2);
+          csv += `"${row.name}",${v23},${v24},${v25},${v26}\n`;
+        }
+      });
+
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `Company_INCOME_STATEMENT_${unitLabel}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    window.onload = function() {
+      renderTable();
+      initCharts();
+    };
+  </script>
+</body>
+</html>

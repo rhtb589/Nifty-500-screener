@@ -130,4 +130,9 @@ def valuation_analysis(ticker: str) -> dict:
         else:
             summary.append(f"P/E Z-Score {z_pe:+.2f} — within one sigma of the sector mean (fairly valued).")
 
-    return make_result(metrics, fig_to_html(fig), append_as_of(summary, row))
+    return make_result(
+        metrics, fig_to_html(fig),
+        append_as_of(summary, row, fields=[
+            "trailingPE", "returnOnEquity", "enterpriseToEbitda", "enterpriseToRevenue",
+        ]),
+    )

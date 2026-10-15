@@ -117,4 +117,4 @@ def volume_analysis(ticker: str) -> dict:
         else:
             summary.append(f"MFI of {mfi:.1f} — neutral money flow.")
 
-    return make_result(metrics, fig_to_html(fig), append_as_of(summary, row))
+    return make_result(metrics, fig_to_html(fig), append_as_of(summary, row, fields=[]))
